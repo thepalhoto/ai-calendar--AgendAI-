@@ -27,7 +27,8 @@ def init_db():
             title TEXT NOT NULL,
             start TEXT NOT NULL,                -- YYYY-MM-DD or ISO8601 Timestamp
             end TEXT NOT NULL,                  -- YYYY-MM-DD or ISO8601 Timestamp
-            recurrence TEXT,                -- NEW: 'daily', 'weekly', 'monthly', 'yearly', or NULL
+            recurrence TEXT,                -- 'daily', 'weekly', 'monthly', 'yearly', or NULL
+            recurrence_end TEXT,          -- End date for recurrence in 'YYYY-MM-DD' format
             backgroundColor TEXT,
             borderColor TEXT,
             resourceId TEXT DEFAULT 'a'

@@ -39,7 +39,7 @@ You have access to the following properties for every event:
 - Recurrence (daily, weekly, monthly, yearly, or None)
 - Color (Hex Code)
 
-CURRENT DATE: {today_str}
+CURRENT DATE: {today_str} (Day: {today.day}, Month: {today.month}, Year: {today.year})
 
 ### RULES & BEHAVIORS:
 
@@ -47,6 +47,7 @@ CURRENT DATE: {today_str}
    - **Duration:** 1 Hour.
    - **AllDay:** False.
    - **Recurrence:** None.
+   - **Recurrence End Date:** None (Infinite) unless specified.
    - **Colors (STRICT MAPPING):**
      - Work/School: #0a9905 (Green)
      - Health (Doctor, Dentist, Meds): #0080FF (Light Blue)
@@ -55,6 +56,7 @@ CURRENT DATE: {today_str}
      - Meetings: #03399e (Dark Blue)
      - Birthdays: #5a0070 (Purple)
      - Everything Else: #999999 (Grey)
+     - **Custom Colors:** If the user explicitly requests a color by name (e.g., "Make it Pink", "Set color to Orange") that is NOT in the strict list, generate a valid Hex code for that specific color.
 
 2. **Missing Information:**
    - You MUST have a **Title** and a **Start Time**. If the user doesn't provide them, ask specifically for those missing pieces.
@@ -65,6 +67,10 @@ CURRENT DATE: {today_str}
      - If the requested day is **later** than today, use the **current month**.
      - If the requested day has **already passed** (is less than or equal to today), use the **NEXT month**.
    - **Weekdays (e.g., "Friday"):** - Find the next occurrence relative to {today_str}.
+   - **Realism Check:** If a user provides an invalid date (e.g., "February 30th"), politely correct them. Do NOT attempt to call tools with impossible dates.
+   - **Recurrence Limits:**
+      - If the user says "until next month" or "for 3 weeks", calculate the specific END DATE and use the `recurrence_end` parameter.
+      - If they don't specify an end, leave `recurrence_end` as None.
 
 4. **Conflict Handling:**
    - **Step 1:** ALWAYS run `list_events_json` before adding an event to check availability.
@@ -73,7 +79,28 @@ CURRENT DATE: {today_str}
 
 5. **Tool Usage:**
    - Use ISO format (YYYY-MM-DDTHH:MM:SS) for all start/end times.
-   - Be concise. Don't explain the tool mechanics, just confirm the result (e.g., "Added 'Gym' on Friday at 5 PM").
+   - Be concise. Don't explain the tool mechanics, just confirm the result.
+   - **Deletion by Name:** The `delete_event` tool requires an ID, not a name. 
+     - IF the user says "Delete [Title]": 
+     - FIRST run `list_events_json` to find the event and get its ID.
+     - THEN run `delete_event(id)`. 
+     - NEVER ask the user for the ID. Find it yourself
+
+6. **Historical Data (NO HALLUCINATIONS):**
+   - You have access to the user's ENTIRE calendar history via `list_events_json`.
+   - If the user asks about the past (e.g., "What did I do in 2023?"), you MUST fetch the full list, filter it yourself, and answer. 
+   - NEVER say you "cannot retrieve historical data"—you already have it.
+
+7. **Reading Schedule (Default View):**
+   - If the user asks "What is on my schedule?" (without specifying a time), assume they mean **TODAY ONLY**.
+   - Do NOT list all future meetings unless the user asks for "everything", "this month", or "future events".
+
+8. **Complex Actions (Rescheduling/Moving):**
+   - If the user asks to "Move" or "Reschedule" an event (e.g., "Move Gym to 5 PM"):
+     - **Step 1:** Find the event ID using `list_events_json`.
+     - **Step 2:** Call `delete_event(id)` to remove the old slot.
+     - **Step 3:** Call `add_event(...)` with the new time.
+   - Perform these steps automatically. Do not ask the user to delete it manually.
 """
 
 def get_agent():

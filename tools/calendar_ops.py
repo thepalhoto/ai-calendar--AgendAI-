@@ -2,7 +2,7 @@ import sqlite3
 import json
 from tools.database_ops import get_db_connection
 
-def add_event(title: str, start: str, end: str, allDay: bool, recurrence: str = None, color: str = "#3788d8") -> str:
+def add_event(title: str, start: str, end: str, allDay: bool, recurrence: str = None, recurrence_end: str = None, color: str = "#3788d8") -> str:
     """
     Adds a new event.
     - If allDay is True, start/end must be 'YYYY-MM-DD'.
@@ -16,13 +16,12 @@ def add_event(title: str, start: str, end: str, allDay: bool, recurrence: str = 
         # SQLite stores booleans as 0 or 1
         is_all_day = 1 if allDay else 0
         
-        # UPDATED QUERY: Added 'recurrence' to columns and values
         cursor.execute(
-            """INSERT INTO events 
-               (title, start, end, allDay, recurrence, backgroundColor, borderColor, resourceId) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (title, start, end, is_all_day, recurrence, color, color, "a")
-        )
+        """INSERT INTO events 
+           (title, start, end, allDay, recurrence, recurrence_end, backgroundColor, borderColor, resourceId) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (title, start, end, is_all_day, recurrence, recurrence_end, color, color, "a")
+    )
         
         conn.commit()
         conn.close()
@@ -60,11 +59,19 @@ def list_events_json() -> str:
             
             # Check if this event has a recurrence rule saved
             if row["recurrence"]:
-                # The frontend calendar needs an 'rrule' object to show repeating events
-                event_dict["rrule"] = {
+                # Build the basic rule object
+                rule = {
                     "freq": row["recurrence"].lower(),  # e.g., 'weekly', 'daily'
                     "dtstart": row["start"]             # Recurrence needs to know when to start counting
                 }
+                
+                # Check if there is an end date (Limit)
+                # If the column exists and is not None, add it to the rule
+                if "recurrence_end" in row.keys() and row["recurrence_end"]:
+                    rule["until"] = row["recurrence_end"]
+
+                event_dict["rrule"] = rule
+            # -------------------------------
             
             events.append(event_dict)
             
