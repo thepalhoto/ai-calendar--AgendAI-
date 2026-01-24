@@ -20,3 +20,7 @@ def get_color_rules_text():
     for cat, hex_code in EVENT_CATEGORIES.items():
         rules += f"- **{cat}:** {hex_code}\n"
     return rules
+
+# AI Configuration
+LLM_MODEL_NAME = "gemini-flash-latest"
+LLM_TEMPERATURE = 0.0  # Low temperature = More deterministic/strict with tools

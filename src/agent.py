@@ -15,8 +15,7 @@ if root_dir not in sys.path:
 
 # --- IMPORTS (Must be after Path Setup) ---
 from tools.calendar_ops import add_event, list_events_json, delete_event, check_availability
-# Now Python can definitely find 'config' because we added root_dir to path
-from config.constants import get_color_rules_text 
+from config.constants import get_color_rules_text, LLM_MODEL_NAME, LLM_TEMPERATURE
 
 # 1. Load API Key
 load_dotenv()
@@ -119,10 +118,16 @@ def get_agent():
     """
     Initializes and returns the Gemini Chat Session with tools enabled.
     """
+    # Define generation config
+    generation_config = {
+        "temperature": LLM_TEMPERATURE,
+    }
+
     model = genai.GenerativeModel(
-        model_name='gemini-flash-latest',
+        model_name=LLM_MODEL_NAME, # Use constant
         tools=tools_list,
-        system_instruction=SYSTEM_INSTRUCTION
+        system_instruction=SYSTEM_INSTRUCTION,
+        generation_config=generation_config # <--- Added here
     )
     
     chat = model.start_chat(enable_automatic_function_calling=True)

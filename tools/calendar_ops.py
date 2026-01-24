@@ -152,8 +152,10 @@ def check_availability(check_datetime: str) -> str:
 
 def get_conflicts_report() -> str:
     """
-    Analyzes the database for overlapping events.
-    Smartly groups recurring conflicts so they aren't listed 50 times.
+    Analyzes the database for ALL types of overlapping events:
+    1. Single vs Single
+    2. Recurring vs Recurring (Series overlap)
+    3. Single vs Recurring (Specific instance overlap)
     """
     try:
         conn = get_db_connection()
@@ -165,48 +167,72 @@ def get_conflicts_report() -> str:
         events = [dict(row) for row in rows]
         conflicts = []
         
-        # --- FIX: Helper to parse time strings AND REMOVE TIMEZONES ---
+        # --- HELPER: Parse Date & STRIP Timezone ---
         def parse_dt(dt_str):
             if "T" in dt_str:
-                # Handle ISO format
                 dt = datetime.fromisoformat(dt_str)
-                # FORCE NAIVE: Remove timezone info so we can compare with everything else
-                return dt.replace(tzinfo=None)
-            
-            # Handle plain dates (always naive)
+                return dt.replace(tzinfo=None) # Force naive for comparison
             return datetime.strptime(dt_str, "%Y-%m-%d")
 
-        # Compare every event against every other event (distinct pairs)
+        # --- HELPER: Check Time Overlap (Independent of Date) ---
+        def time_ranges_overlap(e1, e2):
+            # If either is All Day, they strictly overlap in time (covering the whole day)
+            if e1['allDay'] or e2['allDay']:
+                return True
+            
+            # Extract Time components
+            start1 = parse_dt(e1['start']).time()
+            end1 = parse_dt(e1['end']).time()
+            start2 = parse_dt(e2['start']).time()
+            end2 = parse_dt(e2['end']).time()
+            
+            # Standard overlap logic: (StartA < EndB) and (EndA > StartB)
+            return start1 < end2 and end1 > start2
+
+        # Compare every unique pair
         for i in range(len(events)):
             for j in range(i + 1, len(events)):
                 e1 = events[i]
                 e2 = events[j]
                 
-                # --- CHECK 1: TWO RECURRING SERIES (The "Smart" Check) ---
+                # OPTIMIZATION: If times don't overlap, dates don't matter.
+                # (Unless they are multi-day events, but we assume single-day for this scope)
+                if not time_ranges_overlap(e1, e2):
+                    continue
+
+                # --- CASE 1: TWO RECURRING SERIES ---
                 if e1['recurrence'] == 'weekly' and e2['recurrence'] == 'weekly':
-                    # Do they start on the same weekday?
                     d1 = parse_dt(e1['start'])
                     d2 = parse_dt(e2['start'])
-                    
+                    # Conflict if they are on the SAME WEEKDAY (e.g. both Mondays)
                     if d1.weekday() == d2.weekday():
-                        # Do times overlap?
-                        # Normalize to arbitrary date to compare times only
-                        t1_start = d1.time()
-                        t1_end = parse_dt(e1['end']).time()
-                        t2_start = d2.time()
-                        t2_end = parse_dt(e2['end']).time()
-                        
-                        if t1_start < t2_end and t1_end > t2_start:
-                             conflicts.append(f"⚠️ **Recurring Conflict:** '{e1['title']}' overlaps with '{e2['title']}' every {d1.strftime('%A')}.")
-                             continue # Found a conflict, move to next pair
+                         conflicts.append(f"⚠️ **Recurring Conflict:** '{e1['title']}' and '{e2['title']}' both repeat on {d1.strftime('%A')}s.")
 
-                # --- CHECK 2: TWO SINGLE EVENTS ---
-                if not e1['recurrence'] and not e2['recurrence']:
-                    start1, end1 = parse_dt(e1['start']), parse_dt(e1['end'])
-                    start2, end2 = parse_dt(e2['start']), parse_dt(e2['end'])
+                # --- CASE 2: TWO SINGLE EVENTS ---
+                elif not e1['recurrence'] and not e2['recurrence']:
+                    d1 = parse_dt(e1['start'])
+                    d2 = parse_dt(e2['start'])
+                    if d1.date() == d2.date():
+                        conflicts.append(f"❌ **Date Conflict:** '{e1['title']}' overlaps with '{e2['title']}' on {d1.strftime('%Y-%m-%d')}.")
+
+                # --- CASE 3: MIXED (One Single, One Recurring) ---
+                # This catches: "Dentist" (Single) vs "Class" (Weekly)
+                else:
+                    # Identify which is which
+                    single = e1 if not e1['recurrence'] else e2
+                    recurring = e1 if e1['recurrence'] else e2
                     
-                    if start1 < end2 and end1 > start2:
-                        conflicts.append(f"❌ **Date Conflict:** '{e1['title']}' clashes with '{e2['title']}' on {start1.strftime('%Y-%m-%d')}.")
+                    s_date = parse_dt(single['start']).date()
+                    r_start_date = parse_dt(recurring['start']).date()
+                    
+                    # 1. Does the single event fall on the correct WEEKDAY?
+                    if s_date.weekday() == r_start_date.weekday():
+                        # 2. Is the single event AFTER the series started?
+                        if s_date >= r_start_date:
+                            # 3. If series has an end date, is the single event BEFORE it?
+                            has_end = recurring['recurrence_end']
+                            if not has_end or s_date <= parse_dt(has_end).date():
+                                conflicts.append(f"⚠️ **Instance Conflict:** '{single['title']}' ({s_date}) overlaps with recurring '{recurring['title']}'.")
 
         if not conflicts:
             return "✅ No conflicts found."

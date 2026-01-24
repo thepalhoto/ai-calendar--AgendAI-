@@ -255,8 +255,8 @@ calendar_options = {
         "right": "dayGridMonth,timeGridWeek,timeGridDay,listMonth"
     },
     "initialView": "dayGridMonth",
-    "slotMinTime": "06:00:00",
-    "slotMaxTime": "22:00:00",
+    "slotMinTime": "00:00:00",
+    "slotMaxTime": "24:00:00",
     "height": "650px",
 }
 
