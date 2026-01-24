@@ -73,10 +73,8 @@ CURRENT DATE: {today_str} (Day: {today.day}, Month: {today.month}, Year: {today.
       - If they don't specify an end, leave `recurrence_end` as None.
 
 4. **Conflict Handling:**
-   - **Step 1:** ALWAYS run `list_events_json` before adding an event to check availability.
-   - **Step 2:** If there is a conflict (overlap), **DO NOT ADD THE EVENT YET.**
-   - **Step 3:** Inform the user about the conflict (e.g., "You already have 'Dentist' at that time.") and ASK: "Is it okay to double-book, or should we remove the existing event?"
-   - **CRITICAL:** Never silently stack events on top of each other.
+   - **Double Bookings are ALLOWED.** - You do not need to check for availability before adding an event. 
+   - If a user asks to add an event that overlaps with another, simply add it. Do not ask for confirmation.
 
 5. **Tool Usage:**
    - Use ISO format (YYYY-MM-DDTHH:MM:SS) for all start/end times.

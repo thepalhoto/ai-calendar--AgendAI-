@@ -110,27 +110,18 @@ def extract_events_from_image(image, user_hint=""):
         st.error(f"Vision Processing Error: {e}")
         return []
 
-# --- SIDEBAR: CHAT & UPLOAD ---
+# --- SIDEBAR SETUP ---
 with st.sidebar:
-    st.header("💬 Chat Assistant")
-    
-    # Container for chat messages
-    messages_container = st.container()
-    
-    with messages_container:
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
-
-    # --- DOCUMENT INGESTION WIDGET ---
-    st.markdown("---")
-    st.subheader("📷 Visual Import")
+    # ==========================================
+    # 1. TOP SECTION: VISUAL IMPORT
+    # ==========================================
+    st.header("📷 Visual Import")
     
     uploaded_file = st.file_uploader("Upload schedule image", type=["png", "jpg", "jpeg", "webp"])
     user_hint = st.text_input("Context (Optional)", placeholder="e.g., 'Weekly starting Monday'")
     
     if uploaded_file is not None:
-        if st.button("Process Image"):
+        if st.button("Process Image", type="primary"): 
             with st.spinner("👀 Reading document..."):
                 image = Image.open(uploaded_file)
                 extracted_events = extract_events_from_image(image, user_hint)
@@ -163,7 +154,7 @@ with st.sidebar:
                         sync_text = f"SYSTEM UPDATE: Visual Import tool used. Events added: {', '.join(added_titles)}."
                         try:
                             st.session_state.agent.send_message(sync_text)
-                            st.session_state.messages.append({"role": "assistant", "content": f"📸 Processed image. Added: **{', '.join(added_titles)}**."})
+                            st.session_state.messages.append({"role": "assistant", "content": f"I've processed your image and added **{len(added_titles)}** new events to the calendar."})
                         except Exception as e:
                             print(f"Sync Error: {e}")
                     
@@ -171,6 +162,48 @@ with st.sidebar:
                 else:
                     st.warning("No events found in the image.")
 
+    st.markdown("---")
+
+    # ==========================================
+    # 2. MIDDLE SECTION: AUDIT (Conflict Check)
+    # ==========================================
+    st.subheader("🛡️ Audit")
+    
+    if st.button("Check for Conflicts"):
+        with st.spinner("Analyzing schedule logic..."):
+            try:
+                from tools.calendar_ops import get_conflicts_report
+                report = get_conflicts_report()
+                
+                if "No conflicts" in report:
+                    st.success(report)
+                else:
+                    # Use an expander for long conflict reports so it doesn't clutter
+                    with st.expander("Conflicts Detected!", expanded=True):
+                        st.markdown(report)
+            except ImportError:
+                st.error("Function 'get_conflicts_report' not found. Did you update calendar_ops.py?")
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+    st.markdown("---")
+
+    # ==========================================
+    # 3. BOTTOM SECTION: CHAT HISTORY
+    # ==========================================
+    st.header("💬 Chat Assistant")
+    
+    # Container for chat messages (scrollable area)
+    messages_container = st.container()
+    
+    with messages_container:
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+    # ==========================================
+    # 4. PINNED FOOTER: CHAT INPUT
+    # ==========================================
     # Chat Input (Pins to bottom automatically)
     if prompt := st.chat_input("Add a meeting, check schedule..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
