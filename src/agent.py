@@ -23,7 +23,6 @@ genai.configure(api_key=api_key)
 tools_list = [add_event, list_events_json, delete_event, check_availability]
 
 # 3. Dynamic Date Setup
-# We get today's date dynamically so the model is always up to date.
 today = datetime.date.today()
 today_str = today.strftime("%Y-%m-%d")
 
@@ -49,6 +48,7 @@ CURRENT DATE: {today_str} (Day: {today.day}, Month: {today.month}, Year: {today.
    - **Recurrence:** None.
    - **Recurrence End Date:** None (Infinite) unless specified.
    - **Colors (STRICT MAPPING):**
+     - **INHERITANCE RULE (PRIORITY 1):** If the user asks to "Copy", "Repeat", or "Duplicate" an existing event, **you MUST use the hex code of the original event**. Do NOT re-categorize it using the default list below.
      - Work/School: #0a9905 (Green)
      - Health (Doctor, Dentist, Meds): #0080FF (Light Blue)
      - Exams/Deadlines: #FF0000 (Red)
@@ -56,7 +56,7 @@ CURRENT DATE: {today_str} (Day: {today.day}, Month: {today.month}, Year: {today.
      - Meetings: #03399e (Dark Blue)
      - Birthdays: #5a0070 (Purple)
      - Everything Else: #999999 (Grey)
-     - **Custom Colors:** If the user explicitly requests a color by name (e.g., "Make it Pink", "Set color to Orange") that is NOT in the strict list, generate a valid Hex code for that specific color.
+     - **Custom Colors:** If the user explicitly requests a color by name (e.g., "Make it Pink") that is NOT in the strict list, generate a valid Hex code.
 
 2. **Missing Information:**
    - You MUST have a **Title** and a **Start Time**. If the user doesn't provide them, ask specifically for those missing pieces.
@@ -76,7 +76,6 @@ CURRENT DATE: {today_str} (Day: {today.day}, Month: {today.month}, Year: {today.
    - **Step 1:** ALWAYS run `list_events_json` before adding an event to check availability.
    - **Step 2:** If there is a conflict (overlap), **DO NOT ADD THE EVENT YET.**
    - **Step 3:** Inform the user about the conflict (e.g., "You already have 'Dentist' at that time.") and ASK: "Is it okay to double-book, or should we remove the existing event?"
-   - **Step 4:** Inform the user: "There is already an event ('[Title]') at that time. Do you want to double-book, or reschedule?"
    - **CRITICAL:** Never silently stack events on top of each other.
 
 5. **Tool Usage:**
@@ -86,7 +85,7 @@ CURRENT DATE: {today_str} (Day: {today.day}, Month: {today.month}, Year: {today.
      - IF the user says "Delete [Title]": 
      - FIRST run `list_events_json` to find the event and get its ID.
      - THEN run `delete_event(id)`. 
-     - NEVER ask the user for the ID. Find it yourself
+     - NEVER ask the user for the ID. Find it yourself.
 
 6. **Historical Data (NO HALLUCINATIONS):**
    - You have access to the user's ENTIRE calendar history via `list_events_json`.

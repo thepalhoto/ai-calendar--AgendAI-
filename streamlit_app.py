@@ -1,3 +1,5 @@
+### streamlit_app.py 23/01 23:37
+
 import streamlit as st
 from streamlit_calendar import calendar
 import json
@@ -28,7 +30,7 @@ if "agent" not in st.session_state:
     except Exception as e:
         st.error(f"Error initializing AI: {e}")
 
-# --- HELPER: VISION EXTRACTION (Improved Version) ---
+# --- HELPER: VISION EXTRACTION (Updated Prompt) ---
 def extract_events_from_image(image, user_hint=""):
     """
     Sends an image + user context to Gemini and asks for a strict JSON list.
@@ -42,33 +44,49 @@ def extract_events_from_image(image, user_hint=""):
     monday_str = start_of_week.strftime("%Y-%m-%d")
     
     prompt = f"""
-    You are an expert at extracting academic schedules from grid-based images.
+    You are an expert at extracting events from schedule images (Monthly, Weekly, or Daily).
     
     TASK:
-    Analyze this visual schedule and extract ALL events into a JSON list.
+    Analyze this visual schedule, DETECT the type (Monthly/Weekly/Daily), and extract ALL events into a JSON list.
+
+    1. **AUTO-DETECT CALENDAR TYPE:**
+       - **Weekly/Grid:** Vertical columns for days, Time on the left axis.
+       - **Monthly:** Standard 7-column grid (Sun-Sat or Mon-Sun) with numeric dates in boxes.
+       - **Daily:** A single day column with a time axis.
+
+    2. **DATE & TIME LOGIC:**
+       - **Anchor:** Assume "Monday" of the current week is {monday_str}.
+       - **Weekly View (Default):**
+          - Assume the FIRST column of events is MONDAY.
+          - Subsequent columns are Tue, Wed, Thu, Fri, etc.
+       - **Monthly View:**
+          - If specific times are NOT visible in the box, set "allDay": true.
+       - **Daily View:** Treat as a Weekly view with only one day column.
     
-    CRITICAL GRID RULES:
-    1. **Time Axis:** The leftmost column shows time slots (e.g., 08H00, 08H30). Use these to determine the EXACT start and end time of every block. 
-       - If a block starts halfway between 08H00 and 09H00, it is 08:30.
-       - The height of the box indicates duration. A tall box means a long event.
-    2. **Day Axis:** The columns from left to right usually represent Monday, Tuesday, Wednesday, Thursday, Friday.
-       - Assume the First Event Column = Monday, unless headers say otherwise.
-    3. **No Merging:** If two blocks are visually distinct (separated by white space), they are DIFFERENT events. Do not merge them even if they have the same name.
+    3. **EVENT DETAILS:**
+       - **Colors:** Extract the DOMINANT color of the event box (Hex code). Default to null if black/white.
+       - **Truncated Text:** If a title seems cut off (e.g., "Intro to Comp..."), flag it by adding "[TRUNCATED]" to the title so the user knows.
+       - **Recurrence:** Default to null (NO recurrence) UNLESS the User Hint specifically asks for it (e.g., "These repeat weekly").
+    
+    4. **GRID RULES (for Weekly/Daily):**
+       - The leftmost axis is TIME. Use box height to calculate exact start/end.
+       - **Double Booking Resolution (CRITICAL):**
+         - If the image visually shows two distinct blocks occupying the SAME time slot (overlapping or side-by-side), **IGNORE THE CONFLICT.**
+         - **Action:** Select ONLY ONE event for that time slot. Prioritize the one that is clearly legible or appears "primary" (e.g., takes up more width).
+         - Do NOT return multiple events starting at the exact same time on the same day.
     
     USER HINT: "{user_hint}"
-    (Use this hint to override assumptions, e.g., "This schedule starts on Tuesday").
-    
-    ANCHOR DATE:
-    - Assume "Monday" corresponds to: {monday_str}
-    - Calculate the specific date for each column based on this anchor.
+    (Use this hint to override assumptions, e.g., "Recurrence is weekly", "Start date is...").
     
     OUTPUT FORMAT (Strict JSON):
     [
       {{
-        "title": "Course Name - Room",
+        "title": "Event Title",
         "start": "YYYY-MM-DDTHH:MM:SS",
         "end": "YYYY-MM-DDTHH:MM:SS",
-        "recurrence": "weekly" (default to weekly for academic schedules unless specified otherwise)
+        "allDay": boolean,
+        "backgroundColor": "#HexCode",
+        "recurrence": "weekly" or null
       }}
     ]
     """
