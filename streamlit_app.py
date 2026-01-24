@@ -22,16 +22,21 @@ if config_dir not in sys.path:
 # --- IMPORTS ---
 from src.agent import get_agent
 from tools.calendar_ops import list_events_json, add_event
+
 # Robust Import: Try package import first, fallback to direct
+# UPDATED: Now imports VISION_MODEL_NAME from constants
 try:
-    from config.constants import EVENT_CATEGORIES 
+    from config.constants import EVENT_CATEGORIES, VISION_MODEL_NAME 
+    from config.prompts import get_vision_prompt
 except ImportError:
     try:
-        from constants import EVENT_CATEGORIES
+        from constants import EVENT_CATEGORIES, VISION_MODEL_NAME
+        from prompts import get_vision_prompt
     except ImportError:
         # Fallback if config is totally missing (prevents crash)
         EVENT_CATEGORIES = {"Other": "#999999"}
-        st.error("⚠️ Could not load config/constants.py. Defaulting to Grey.")
+        VISION_MODEL_NAME = "gemini-2.0-flash" # Fallback default
+        st.error("⚠️ Could not load config. Defaulting to Grey & Default Vision Model.")
 
 # --- PAGE SETUP ---
 st.set_page_config(page_title="AgendAI", layout="wide")
@@ -57,7 +62,8 @@ def extract_events_from_image(image, user_hint=""):
     """
     Sends an image + user context to Gemini and asks for a strict JSON list with CATEGORIES.
     """
-    vision_model = genai.GenerativeModel('gemini-2.0-flash') 
+    # UPDATED: Uses the centralized constant instead of hardcoded string
+    vision_model = genai.GenerativeModel(VISION_MODEL_NAME) 
     
     today = datetime.date.today()
     
@@ -77,49 +83,8 @@ def extract_events_from_image(image, user_hint=""):
     # Extract valid keys for the prompt
     valid_keys = ", ".join(EVENT_CATEGORIES.keys())
     
-    prompt = f"""
-    You are an expert at extracting events from schedule images.
-    
-    TASK:
-    Analyze this visual schedule and extract ALL events into a JSON list.
-
-    1. **DATE & TIME LOGIC:**
-       - **Anchor:** Treat the Monday column (or start of week) as **{monday_str}**.
-       - **Weekly View:** Vertical columns. Mon, Tue, Wed...
-       - **Monthly View:** Grid. If specific times hidden, set "allDay": true.
-    
-    2. **EVENT DETAILS:**
-       - **Title:** Extract exact text. If cut off, add "[TRUNCATED]".
-       - **Recurrence:** Default to null. ONLY set if user hint explicitly says "repeat/weekly".
-       
-       - **CATEGORY (CRITICAL):** Do NOT extract the color from the image. 
-         Analyze the Title/Context and assign one of these EXACT keys:
-         [{valid_keys}]
-         
-         *Examples:*
-         - "Dentist" -> "Health"
-         - "Deep Learning", "Lecture" -> "Work_School"
-         - "Soccer", "Gym" -> "Extracurricular"
-         - "Meeting", "Sync" -> "Meetings"
-         - If unsure -> "Other"
-
-    3. **GRID RULES:**
-       - **Double Booking:** If events overlap visually, **EXTRACT ALL OF THEM.**
-    
-    USER HINT: "{user_hint}"
-    
-    OUTPUT FORMAT (Strict JSON):
-    [
-      {{
-        "title": "Event Title",
-        "start": "YYYY-MM-DDTHH:MM:SS",
-        "end": "YYYY-MM-DDTHH:MM:SS",
-        "allDay": boolean,
-        "category": "One_Of_The_Valid_Keys",
-        "recurrence": "weekly" or null
-      }}
-    ]
-    """
+    # --- FETCH PROMPT FROM CONFIG ---
+    prompt = get_vision_prompt(monday_str, valid_keys, user_hint)
     
     try:
         response = vision_model.generate_content([prompt, image])

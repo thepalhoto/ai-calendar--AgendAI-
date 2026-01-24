@@ -22,5 +22,6 @@ def get_color_rules_text():
     return rules
 
 # AI Configuration
-LLM_MODEL_NAME = "gemini-flash-latest"
-LLM_TEMPERATURE = 0.0  # Low temperature = More deterministic/strict with tools
+LLM_MODEL_NAME = "gemini-flash-latest"       # Used for Chat Agent
+VISION_MODEL_NAME = "gemini-2.0-flash"       # Used for Image Extraction <--- NEW
+LLM_TEMPERATURE = 0.0
