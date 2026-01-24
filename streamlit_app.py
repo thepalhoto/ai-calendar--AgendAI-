@@ -1,5 +1,3 @@
-### streamlit_app.py 23/01 23:37
-
 import streamlit as st
 from streamlit_calendar import calendar
 import json
@@ -39,8 +37,19 @@ def extract_events_from_image(image, user_hint=""):
     
     today = datetime.date.today()
     
-    # Anchor date for Monday calculation
+    # 1. Calculate THIS week's Monday
     start_of_week = today - datetime.timedelta(days=today.weekday())
+
+    # --- INTELLIGENT DATE SHIFT ---
+    # If the user hints at the future, move the anchor date forward in Python
+    # so the AI doesn't have to guess.
+    if user_hint:
+        hint_lower = user_hint.lower()
+        if "next week" in hint_lower or "incoming week" in hint_lower:
+            start_of_week += datetime.timedelta(days=7)
+        elif "following week" in hint_lower:
+            start_of_week += datetime.timedelta(days=7)
+            
     monday_str = start_of_week.strftime("%Y-%m-%d")
     
     prompt = f"""
@@ -55,25 +64,27 @@ def extract_events_from_image(image, user_hint=""):
        - **Daily:** A single day column with a time axis.
 
     2. **DATE & TIME LOGIC:**
-       - **Anchor:** Assume "Monday" of the current week is {monday_str}.
+       - **Anchor:** Treat the **Monday column** (or start of week) in this image as being **{monday_str}**.
        - **Weekly View (Default):**
-          - Assume the FIRST column of events is MONDAY.
-          - Subsequent columns are Tue, Wed, Thu, Fri, etc.
+         - Assume the FIRST column of events is MONDAY.
+         - Subsequent columns are Tue, Wed, Thu, Fri, etc.
        - **Monthly View:**
-          - If specific times are NOT visible in the box, set "allDay": true.
+         - If specific times are NOT visible in the box, set "allDay": true.
        - **Daily View:** Treat as a Weekly view with only one day column.
     
     3. **EVENT DETAILS:**
        - **Colors:** Extract the DOMINANT color of the event box (Hex code). Default to null if black/white.
        - **Truncated Text:** If a title seems cut off (e.g., "Intro to Comp..."), flag it by adding "[TRUNCATED]" to the title so the user knows.
-       - **Recurrence:** Default to null (NO recurrence) UNLESS the User Hint specifically asks for it (e.g., "These repeat weekly").
+       - **Recurrence:** Default to null (NO recurrence).
+          - ONLY set recurrence if the User Hint EXPLICITLY uses words like "repeat", "recurring", or "every week".
+          - **CRITICAL:** Phrases like "next week", "this week", or "incoming week" define the DATE range, NOT the recurrence. Do not make events recurring just because the view is weekly.
     
     4. **GRID RULES (for Weekly/Daily):**
        - The leftmost axis is TIME. Use box height to calculate exact start/end.
-       - **Double Booking Resolution (CRITICAL):**
-         - If the image visually shows two distinct blocks occupying the SAME time slot (overlapping or side-by-side), **IGNORE THE CONFLICT.**
-         - **Action:** Select ONLY ONE event for that time slot. Prioritize the one that is clearly legible or appears "primary" (e.g., takes up more width).
-         - Do NOT return multiple events starting at the exact same time on the same day.
+       - **Double Booking Resolution:**
+         - If the image visually shows two distinct blocks occupying the SAME time slot (overlapping or side-by-side), **EXTRACT ALL OF THEM.**
+         - **Action:** Create a separate JSON object for every distinct event box you see.
+         - **Do NOT filter** or pick a "winner". It is perfectly fine to return multiple events starting at the exact same time.
     
     USER HINT: "{user_hint}"
     (Use this hint to override assumptions, e.g., "Recurrence is weekly", "Start date is...").
