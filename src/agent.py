@@ -4,12 +4,19 @@ import datetime
 import google.generativeai as genai
 from dotenv import load_dotenv
 
-# --- PATH SETUP ---
+# --- PATH SETUP (BULLETPROOF) ---
+# 1. Get the path to the 'src' folder
 current_dir = os.path.dirname(os.path.abspath(__file__))
+# 2. Get the path to the Root folder (one level up)
 root_dir = os.path.dirname(current_dir)
-sys.path.append(root_dir)
+# 3. Force add Root to the system path if it's not there
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
 
+# --- IMPORTS (Must be after Path Setup) ---
 from tools.calendar_ops import add_event, list_events_json, delete_event, check_availability
+# Now Python can definitely find 'config' because we added root_dir to path
+from config.constants import get_color_rules_text 
 
 # 1. Load API Key
 load_dotenv()
@@ -26,7 +33,10 @@ tools_list = [add_event, list_events_json, delete_event, check_availability]
 today = datetime.date.today()
 today_str = today.strftime("%Y-%m-%d")
 
-# 4. Define the AI Persona (System Prompt)
+# 4. Fetch Shared Rules
+color_rules = get_color_rules_text()
+
+# 5. Define the AI Persona (System Prompt)
 SYSTEM_INSTRUCTION = f"""
 You are AgendAI, a smart calendar assistant.
 Your goal is to help the user manage their schedule.
@@ -49,13 +59,7 @@ CURRENT DATE: {today_str} (Day: {today.day}, Month: {today.month}, Year: {today.
    - **Recurrence End Date:** None (Infinite) unless specified.
    - **Colors (STRICT MAPPING):**
      - **INHERITANCE RULE (PRIORITY 1):** If the user asks to "Copy", "Repeat", or "Duplicate" an existing event, **you MUST use the hex code of the original event**. Do NOT re-categorize it using the default list below.
-     - Work/School: #0a9905 (Green)
-     - Health (Doctor, Dentist, Meds): #0080FF (Light Blue)
-     - Exams/Deadlines: #FF0000 (Red)
-     - Extracurricular (Sports, Gym, Dates, Hobbies): #e3e627 (Yellow)
-     - Meetings: #03399e (Dark Blue)
-     - Birthdays: #5a0070 (Purple)
-     - Everything Else: #999999 (Grey)
+{color_rules}
      - **Custom Colors:** If the user explicitly requests a color by name (e.g., "Make it Pink") that is NOT in the strict list, generate a valid Hex code.
 
 2. **Missing Information:**

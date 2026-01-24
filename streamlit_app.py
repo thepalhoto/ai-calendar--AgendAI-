@@ -4,10 +4,34 @@ import json
 import datetime
 from PIL import Image
 import google.generativeai as genai
+import sys
+import os
 
-# Import your Agent and Database tools
+# --- PATH SETUP (BULLETPROOF) ---
+# 1. Get path to Root
+root_dir = os.path.dirname(os.path.abspath(__file__))
+# 2. Get path to Config
+config_dir = os.path.join(root_dir, 'config')
+
+# 3. Add both to sys.path to ensure imports work
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+if config_dir not in sys.path:
+    sys.path.insert(0, config_dir)
+
+# --- IMPORTS ---
 from src.agent import get_agent
 from tools.calendar_ops import list_events_json, add_event
+# Robust Import: Try package import first, fallback to direct
+try:
+    from config.constants import EVENT_CATEGORIES 
+except ImportError:
+    try:
+        from constants import EVENT_CATEGORIES
+    except ImportError:
+        # Fallback if config is totally missing (prevents crash)
+        EVENT_CATEGORIES = {"Other": "#999999"}
+        st.error("⚠️ Could not load config/constants.py. Defaulting to Grey.")
 
 # --- PAGE SETUP ---
 st.set_page_config(page_title="AgendAI", layout="wide")
@@ -28,10 +52,10 @@ if "agent" not in st.session_state:
     except Exception as e:
         st.error(f"Error initializing AI: {e}")
 
-# --- HELPER: VISION EXTRACTION (Updated Prompt) ---
+# --- HELPER: VISION EXTRACTION ---
 def extract_events_from_image(image, user_hint=""):
     """
-    Sends an image + user context to Gemini and asks for a strict JSON list.
+    Sends an image + user context to Gemini and asks for a strict JSON list with CATEGORIES.
     """
     vision_model = genai.GenerativeModel('gemini-2.0-flash') 
     
@@ -41,8 +65,6 @@ def extract_events_from_image(image, user_hint=""):
     start_of_week = today - datetime.timedelta(days=today.weekday())
 
     # --- INTELLIGENT DATE SHIFT ---
-    # If the user hints at the future, move the anchor date forward in Python
-    # so the AI doesn't have to guess.
     if user_hint:
         hint_lower = user_hint.lower()
         if "next week" in hint_lower or "incoming week" in hint_lower:
@@ -52,42 +74,39 @@ def extract_events_from_image(image, user_hint=""):
             
     monday_str = start_of_week.strftime("%Y-%m-%d")
     
+    # Extract valid keys for the prompt
+    valid_keys = ", ".join(EVENT_CATEGORIES.keys())
+    
     prompt = f"""
-    You are an expert at extracting events from schedule images (Monthly, Weekly, or Daily).
+    You are an expert at extracting events from schedule images.
     
     TASK:
-    Analyze this visual schedule, DETECT the type (Monthly/Weekly/Daily), and extract ALL events into a JSON list.
+    Analyze this visual schedule and extract ALL events into a JSON list.
 
-    1. **AUTO-DETECT CALENDAR TYPE:**
-       - **Weekly/Grid:** Vertical columns for days, Time on the left axis.
-       - **Monthly:** Standard 7-column grid (Sun-Sat or Mon-Sun) with numeric dates in boxes.
-       - **Daily:** A single day column with a time axis.
+    1. **DATE & TIME LOGIC:**
+       - **Anchor:** Treat the Monday column (or start of week) as **{monday_str}**.
+       - **Weekly View:** Vertical columns. Mon, Tue, Wed...
+       - **Monthly View:** Grid. If specific times hidden, set "allDay": true.
+    
+    2. **EVENT DETAILS:**
+       - **Title:** Extract exact text. If cut off, add "[TRUNCATED]".
+       - **Recurrence:** Default to null. ONLY set if user hint explicitly says "repeat/weekly".
+       
+       - **CATEGORY (CRITICAL):** Do NOT extract the color from the image. 
+         Analyze the Title/Context and assign one of these EXACT keys:
+         [{valid_keys}]
+         
+         *Examples:*
+         - "Dentist" -> "Health"
+         - "Deep Learning", "Lecture" -> "Work_School"
+         - "Soccer", "Gym" -> "Extracurricular"
+         - "Meeting", "Sync" -> "Meetings"
+         - If unsure -> "Other"
 
-    2. **DATE & TIME LOGIC:**
-       - **Anchor:** Treat the **Monday column** (or start of week) in this image as being **{monday_str}**.
-       - **Weekly View (Default):**
-         - Assume the FIRST column of events is MONDAY.
-         - Subsequent columns are Tue, Wed, Thu, Fri, etc.
-       - **Monthly View:**
-         - If specific times are NOT visible in the box, set "allDay": true.
-       - **Daily View:** Treat as a Weekly view with only one day column.
-    
-    3. **EVENT DETAILS:**
-       - **Colors:** Extract the DOMINANT color of the event box (Hex code). Default to null if black/white.
-       - **Truncated Text:** If a title seems cut off (e.g., "Intro to Comp..."), flag it by adding "[TRUNCATED]" to the title so the user knows.
-       - **Recurrence:** Default to null (NO recurrence).
-          - ONLY set recurrence if the User Hint EXPLICITLY uses words like "repeat", "recurring", or "every week".
-          - **CRITICAL:** Phrases like "next week", "this week", or "incoming week" define the DATE range, NOT the recurrence. Do not make events recurring just because the view is weekly.
-    
-    4. **GRID RULES (for Weekly/Daily):**
-       - The leftmost axis is TIME. Use box height to calculate exact start/end.
-       - **Double Booking Resolution:**
-         - If the image visually shows two distinct blocks occupying the SAME time slot (overlapping or side-by-side), **EXTRACT ALL OF THEM.**
-         - **Action:** Create a separate JSON object for every distinct event box you see.
-         - **Do NOT filter** or pick a "winner". It is perfectly fine to return multiple events starting at the exact same time.
+    3. **GRID RULES:**
+       - **Double Booking:** If events overlap visually, **EXTRACT ALL OF THEM.**
     
     USER HINT: "{user_hint}"
-    (Use this hint to override assumptions, e.g., "Recurrence is weekly", "Start date is...").
     
     OUTPUT FORMAT (Strict JSON):
     [
@@ -96,7 +115,7 @@ def extract_events_from_image(image, user_hint=""):
         "start": "YYYY-MM-DDTHH:MM:SS",
         "end": "YYYY-MM-DDTHH:MM:SS",
         "allDay": boolean,
-        "backgroundColor": "#HexCode",
+        "category": "One_Of_The_Valid_Keys",
         "recurrence": "weekly" or null
       }}
     ]
@@ -112,9 +131,7 @@ def extract_events_from_image(image, user_hint=""):
 
 # --- SIDEBAR SETUP ---
 with st.sidebar:
-    # ==========================================
-    # 1. TOP SECTION: VISUAL IMPORT
-    # ==========================================
+    # 1. VISUAL IMPORT
     st.header("📷 Visual Import")
     
     uploaded_file = st.file_uploader("Upload schedule image", type=["png", "jpg", "jpeg", "webp"])
@@ -133,15 +150,26 @@ with st.sidebar:
                     for i, event in enumerate(extracted_events):
                         try:
                             title = event.get("title", "Untitled")
+                            
+                            # --- COLOR ASSIGNMENT LOGIC ---
+                            # 1. Get the category AI found (e.g. "Work_School")
+                            ai_category = event.get("category", "Other")
+                            
+                            # 2. Map to Hex Code (e.g. "#0a9905")
+                            # Fallback to Grey if the AI hallucinates a new key
+                            final_color = EVENT_CATEGORIES.get(ai_category, EVENT_CATEGORIES["Other"])
+                            
+                            # 3. Force add with the specific color
                             add_event(
                                 title=title,
                                 start=event.get("start"),
                                 end=event.get("end"),
                                 allDay=event.get("allDay", False),
                                 recurrence=event.get("recurrence", None),
-                                recurrence_end=event.get("recurrence_end", None)
+                                recurrence_end=event.get("recurrence_end", None),
+                                color=final_color 
                             )
-                            added_titles.append(title)
+                            added_titles.append(f"{title} ({ai_category})")
                         except Exception as e:
                             st.error(f"Failed to add {title}: {e}")
                         
@@ -149,12 +177,11 @@ with st.sidebar:
                     
                     st.success(f"✅ Imported {len(added_titles)} events.")
                     
-                    # --- SYNC WITH AGENT MEMORY ---
                     if added_titles:
-                        sync_text = f"SYSTEM UPDATE: Visual Import tool used. Events added: {', '.join(added_titles)}."
+                        sync_text = f"SYSTEM UPDATE: Visual Import used. Added: {', '.join(added_titles)}."
                         try:
                             st.session_state.agent.send_message(sync_text)
-                            st.session_state.messages.append({"role": "assistant", "content": f"I've processed your image and added **{len(added_titles)}** new events to the calendar."})
+                            st.session_state.messages.append({"role": "assistant", "content": f"I've processed your image. Based on the titles, I categorized and colored **{len(added_titles)}** events."})
                         except Exception as e:
                             print(f"Sync Error: {e}")
                     
@@ -164,9 +191,7 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # ==========================================
-    # 2. MIDDLE SECTION: AUDIT (Conflict Check)
-    # ==========================================
+    # 2. AUDIT
     st.subheader("🛡️ Audit")
     
     if st.button("Check for Conflicts"):
@@ -178,22 +203,18 @@ with st.sidebar:
                 if "No conflicts" in report:
                     st.success(report)
                 else:
-                    # Use an expander for long conflict reports so it doesn't clutter
                     with st.expander("Conflicts Detected!", expanded=True):
                         st.markdown(report)
             except ImportError:
-                st.error("Function 'get_conflicts_report' not found. Did you update calendar_ops.py?")
+                st.error("Function 'get_conflicts_report' not found.")
             except Exception as e:
                 st.error(f"Error: {e}")
 
     st.markdown("---")
 
-    # ==========================================
-    # 3. BOTTOM SECTION: CHAT HISTORY
-    # ==========================================
+    # 3. CHAT HISTORY
     st.header("💬 Chat Assistant")
     
-    # Container for chat messages (scrollable area)
     messages_container = st.container()
     
     with messages_container:
@@ -201,10 +222,7 @@ with st.sidebar:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
 
-    # ==========================================
-    # 4. PINNED FOOTER: CHAT INPUT
-    # ==========================================
-    # Chat Input (Pins to bottom automatically)
+    # 4. CHAT INPUT
     if prompt := st.chat_input("Add a meeting, check schedule..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with messages_container:
