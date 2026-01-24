@@ -26,38 +26,59 @@ def parse_dt(dt_str: str) -> datetime:
 def add_event(title: str, start: str, end: str, allDay: bool, recurrence: str = None, recurrence_end: str = None, color: str = "#3788d8") -> str:
     """
     Adds a new event.
-    - If allDay is True, start/end must be 'YYYY-MM-DD'.
-    - If allDay is False, start/end must be 'YYYY-MM-DDTHH:MM:SS'.
+    Forces dates to be 'Naive' (Floating) to prevent DST shifts.
     """
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 1. IDEMPOTENCY CHECK (OPTIONAL BUT RECOMMENDED)
-        # Check if an exact duplicate exists to prevent "double click" imports
+        # --- FIX START: Sanitize Dates for Floating Time ---
+        # We parse the input and reformulate it as a clean ISO string without offsets.
+        # This ensures "09:00" stays "09:00" forever.
+        
+        def make_naive_iso(dt_str):
+            # Parse using your existing helper or dateutil
+            if "T" in dt_str:
+                dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+            else:
+                dt = datetime.strptime(dt_str, "%Y-%m-%d")
+            
+            # Strip timezone info
+            dt_naive = dt.replace(tzinfo=None)
+            
+            # Return strict ISO format
+            if "T" in dt_str:
+                return dt_naive.isoformat() # Returns YYYY-MM-DDTHH:MM:SS
+            return dt_naive.strftime("%Y-%m-%d")
+
+        clean_start = make_naive_iso(start)
+        clean_end = make_naive_iso(end)
+        # --- FIX END ---
+
+        # 1. IDEMPOTENCY CHECK (Use clean dates)
         cursor.execute(
             "SELECT id FROM events WHERE title = ? AND start = ?", 
-            (title, start)
+            (title, clean_start)
         )
         if cursor.fetchone():
             conn.close()
-            return f"Skipped: Event '{title}' already exists at {start}."
+            return f"Skipped: Event '{title}' already exists at {clean_start}."
 
-        # 2. INSERT
+        # 2. INSERT (Use clean dates)
         is_all_day = 1 if allDay else 0
         
         cursor.execute(
         """INSERT INTO events 
            (title, start, end, allDay, recurrence, recurrence_end, backgroundColor, borderColor, resourceId) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (title, start, end, is_all_day, recurrence, recurrence_end, color, color, "a")
+        (title, clean_start, clean_end, is_all_day, recurrence, recurrence_end, color, color, "a")
     )
         
         conn.commit()
         conn.close()
         
         rec_msg = f" (Repeats: {recurrence})" if recurrence else ""
-        return f"Success: Event '{title}' added.{rec_msg} (Start: {start})"
+        return f"Success: Event '{title}' added.{rec_msg} (Start: {clean_start})"
     except Exception as e:
         return f"Error adding event: {str(e)}"
 
@@ -164,6 +185,7 @@ def check_availability(check_datetime: str) -> str:
 def get_conflicts_report() -> str:
     """
     Analyzes the database for overlapping events.
+    Handles 'Split Series' by checking if recurrence ranges actually overlap.
     """
     try:
         conn = get_db_connection()
@@ -180,7 +202,7 @@ def get_conflicts_report() -> str:
             if e1['allDay'] or e2['allDay']:
                 return True
             
-            # Refactored to use shared parse_dt
+            # Use shared parse_dt
             start1 = parse_dt(e1['start']).time()
             end1 = parse_dt(e1['end']).time()
             start2 = parse_dt(e2['start']).time()
@@ -193,17 +215,33 @@ def get_conflicts_report() -> str:
                 e1 = events[i]
                 e2 = events[j]
                 
+                # OPTIMIZATION: If times don't overlap, dates don't matter.
                 if not time_ranges_overlap(e1, e2):
                     continue
 
-                # Refactored to use shared parse_dt
                 d1 = parse_dt(e1['start'])
                 d2 = parse_dt(e2['start'])
 
-                # --- CASE 1: TWO RECURRING SERIES ---
+                # --- CASE 1: TWO RECURRING SERIES (UPDATED) ---
                 if e1['recurrence'] == 'weekly' and e2['recurrence'] == 'weekly':
+                    # Only potential conflict if same weekday
                     if d1.weekday() == d2.weekday():
-                          conflicts.append(f"⚠️ **Recurring Conflict:** '{e1['title']}' and '{e2['title']}' both repeat on {d1.strftime('%A')}s.")
+                        # --- FIX START: CHECK DATE RANGES ---
+                        # We must check if the "Active Period" of Series A overlaps with Series B
+                        
+                        # Define Start Dates
+                        s1_date = d1.date()
+                        s2_date = d2.date()
+                        
+                        # Define End Dates (Handle infinite/None)
+                        # We use datetime.max.date() to represent "Forever"
+                        e1_end_date = parse_dt(e1['recurrence_end']).date() if e1.get('recurrence_end') else datetime.max.date()
+                        e2_end_date = parse_dt(e2['recurrence_end']).date() if e2.get('recurrence_end') else datetime.max.date()
+                        
+                        # Logic: Two ranges overlap if (StartA <= EndB) AND (EndA >= StartB)
+                        if s1_date <= e2_end_date and e1_end_date >= s2_date:
+                             conflicts.append(f"⚠️ **Recurring Conflict:** '{e1['title']}' and '{e2['title']}' both repeat on {d1.strftime('%A')}s.")
+                        # --- FIX END ---
 
                 # --- CASE 2: TWO SINGLE EVENTS ---
                 elif not e1['recurrence'] and not e2['recurrence']:

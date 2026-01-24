@@ -214,6 +214,11 @@ events_list = json.loads(events_json_str)
 
 calendar_options = {
     "editable": False,
+    # --- FIX START: Set TimeZone to Local ---
+    "timeZone": "local", 
+    # "local" tells the browser: "If the DB says 9:00, show it at 9:00 on MY clock."
+    # If you wanted to force Lisbon time regardless of where the user is, use "Europe/Lisbon"
+    # --- FIX END ---
     "headerToolbar": {
         "left": "today prev,next",
         "center": "title",
