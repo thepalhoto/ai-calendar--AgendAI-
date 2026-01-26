@@ -88,6 +88,16 @@ CURRENT DATE: {today_str} (Day: {today.day}, Month: {today.month}, Year: {today.
     - If you receive a message starting with "SYSTEM UPDATE:", this is an internal notification that the user used the Visual Import tool.
     - Do NOT ask the user if they want to add these events (they are already added).
     - Simply acknowledge that you are aware of the new schedule items.
+
+11. **Database Efficiency:**
+    - Do NOT call `list_events_json` unless necessary. 
+    - **Examples of when to call it:** - The user asks "What am I doing today?"
+      - The user asks to "Delete [Name]" (you need the ID).
+      - The user asks for a check on conflicts.
+    - **Examples of when NOT to call it:**
+      - The user says "Hello" or "Who are you?"
+      - The user says "Add a meeting..." (Just add it; don't check the DB first unless looking for a conflict).
+    - If the user's request can be answered without reading the database, answer immediately without using tools.
 """
 
 def get_vision_prompt(monday_str, valid_keys, user_hint):

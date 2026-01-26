@@ -2,8 +2,10 @@ import sqlite3
 import json
 from tools.database_ops import get_db_connection
 from datetime import datetime
+from langfuse import observe
 
 # --- SHARED HELPER: DATE PARSING ---
+
 def parse_dt(dt_str: str) -> datetime:
     """
     Parses a date string into a datetime object.
@@ -22,6 +24,8 @@ def parse_dt(dt_str: str) -> datetime:
         return datetime.now() 
 
 # --- CORE FUNCTIONS ---
+
+@observe(as_type="tool")
 
 def add_event(title: str, start: str, end: str, allDay: bool, recurrence: str = None, recurrence_end: str = None, color: str = "#3788d8") -> str:
     """
@@ -82,10 +86,37 @@ def add_event(title: str, start: str, end: str, allDay: bool, recurrence: str = 
     except Exception as e:
         return f"Error adding event: {str(e)}"
 
+@observe(as_type="tool")
+
 def list_events_json() -> str:
     """
-    Returns ALL events in the exact JSON format required by the frontend calendar.
-    Includes 'duration' for recurring events to fix visual shortening.
+    Fetches ALL events from the database and formats them into the specific JSON structure 
+    required by the frontend calendar widget.
+
+    ---------------------------------------------------------------------------
+    CRITICAL EFFICIENCY RULES (DO NOT CALL UNLESS NECESSARY)
+    ---------------------------------------------------------------------------
+    You should NOT call this tool for every single user message. Only use it when
+    you strictly need to 'read' the schedule to answer a question or perform an ID lookup.
+
+    WHEN TO CALL THIS TOOL:
+      1. User asks "What am I doing today?", "Show my schedule", or "Do I have free time?".
+      2. User asks to "Delete [Event Name]" -> You MUST call this to find the Event ID first.
+      3. User asks "Do I have any conflicts?" -> You need the list to check.
+      4. User asks for a summary of past/future events.
+
+    WHEN TO SKIP THIS TOOL (SAVE RESOURCES):
+      1. User says "Add a meeting at 2pm" -> Just call `add_event` directly. Do NOT check availability first unless asked.
+      2. User says "Hello" or "Who are you?" -> No database access needed.
+      3. User provides a SYSTEM UPDATE (Visual Import) -> The events are already added.
+
+    ---------------------------------------------------------------------------
+    
+    Returns:
+        str: A JSON string representing a list of event objects.
+             - Includes calculated 'duration' for recurring events to ensure 
+               visual accuracy on the frontend.
+             - Formats: 'rrule' for recurrence, 'backgroundColor' for UI.
     """
     try:
         conn = get_db_connection()
@@ -142,6 +173,8 @@ def list_events_json() -> str:
         print(f"Error listing events: {e}") 
         return "[]"
 
+@observe(as_type="tool")
+
 def delete_event(event_id: int) -> str:
     """
     Deletes an event by its ID.
@@ -164,6 +197,8 @@ def delete_event(event_id: int) -> str:
     except Exception as e:
         return f"Error deleting event: {str(e)}"
 
+@observe(as_type="tool")
+
 def check_availability(check_datetime: str) -> str:
     """
     Simple check to see if any non-allDay event starts exactly at this time.
@@ -181,6 +216,8 @@ def check_availability(check_datetime: str) -> str:
             return "Free: No event starts exactly at this time."
     except Exception as e:
         return f"Error checking availability: {str(e)}"
+
+@observe(as_type="tool")
 
 def get_conflicts_report() -> str:
     """
