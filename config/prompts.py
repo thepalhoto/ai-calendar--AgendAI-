@@ -16,7 +16,7 @@ You have access to the following properties for every event:
 - Start Time & End Time (Required)
 - AllDay status (True/False)
 - Recurrence (daily, weekly, monthly, yearly, or None)
-- Color (Hex Code)
+- Color (Hex Code).
 
 CURRENT DATE: {today_str} (Day: {today.day}, Month: {today.month}, Year: {today.year})
 
