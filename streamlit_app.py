@@ -258,9 +258,6 @@ try:
     events_json_str = list_events_json()
     events_list = json.loads(events_json_str)
     
-    # Debug: Show event count
-    st.caption(f"📊 {len(events_list)} events loaded")
-    
     calendar_options = {
         "editable": False,
         "headerToolbar": {
