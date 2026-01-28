@@ -2,7 +2,16 @@ import sqlite3
 import json
 from tools.database_ops import get_db_connection
 from datetime import datetime
-from langfuse import observe
+
+# --- LANGFUSE SETUP (Optional, with fallback) ---
+try:
+    from langfuse import observe
+except ImportError:
+    # Create a no-op decorator if Langfuse is not available
+    def observe(**kwargs):
+        def decorator(func):
+            return func
+        return decorator
 
 # --- SHARED HELPER: DATE PARSING ---
 
@@ -139,14 +148,14 @@ def list_events_json() -> str:
             }
             
             # --- HANDLE RECURRENCE DURATION ---
-            if row["recurrence"]:
-                # 1. Build Rule
+            if row["recurrence"] and row["recurrence"].lower() != "none":
+                # 1. Build Rule (only if actual recurrence exists)
                 rule = {
                     "freq": row["recurrence"].lower(),
                     "dtstart": row["start"] 
                 }
                 
-                if "recurrence_end" in row.keys() and row["recurrence_end"]:
+                if "recurrence_end" in row.keys() and row["recurrence_end"] and row["recurrence_end"] != "None":
                     rule["until"] = row["recurrence_end"]
 
                 event_dict["rrule"] = rule

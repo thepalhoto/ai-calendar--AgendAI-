@@ -3,7 +3,7 @@ from streamlit_calendar import calendar
 import json
 import datetime
 from PIL import Image
-import google.generativeai as genai
+from google import genai
 import sys
 import os
 
@@ -22,6 +22,17 @@ if config_dir not in sys.path:
 # --- IMPORTS ---
 from src.agent import get_agent
 from tools.calendar_ops import list_events_json, add_event
+
+# --- INITIALIZE GENAI CLIENT ---
+# Load API Key for vision extraction
+import os
+from dotenv import load_dotenv
+load_dotenv()
+api_key = os.getenv("GOOGLE_API_KEY")
+if api_key:
+    genai_client = genai.Client(api_key=api_key)
+else:
+    genai_client = None
 
 # Robust Import: Try package import first, fallback to direct
 # UPDATED: Now imports VISION_MODEL_NAME from constants
@@ -62,8 +73,9 @@ def extract_events_from_image(image, user_hint=""):
     """
     Sends an image + user context to Gemini and asks for a strict JSON list with CATEGORIES.
     """
-    # UPDATED: Uses the centralized constant instead of hardcoded string
-    vision_model = genai.GenerativeModel(VISION_MODEL_NAME) 
+    if not genai_client:
+        st.error("API Key not configured for vision extraction.")
+        return []
     
     today = datetime.date.today()
     
@@ -87,7 +99,24 @@ def extract_events_from_image(image, user_hint=""):
     prompt = get_vision_prompt(monday_str, valid_keys, user_hint)
     
     try:
-        response = vision_model.generate_content([prompt, image])
+        import io
+        
+        # Convert PIL Image to bytes
+        image_bytes = io.BytesIO()
+        image.save(image_bytes, format='JPEG')
+        image_bytes = image_bytes.getvalue()
+        
+        # Create response using the new API format
+        response = genai_client.models.generate_content(
+            model=VISION_MODEL_NAME,
+            contents=[
+                genai.types.Part.from_text(text=prompt),
+                genai.types.Part.from_data(
+                    data=image_bytes,
+                    mime_type='image/jpeg'
+                )
+            ]
+        )
         text_data = response.text.replace("```json", "").replace("```", "").strip()
         return json.loads(text_data)
     except Exception as e:
@@ -199,35 +228,54 @@ with st.sidebar:
                 try:
                     response_placeholder = st.empty()
                     response_placeholder.markdown("Thinking...")
+                    
+                    # Send message and get response
                     response = st.session_state.agent.send_message(prompt)
-                    response_placeholder.markdown(response.text)
-                    st.session_state.messages.append({"role": "assistant", "content": response.text})
-                    st.rerun()
+                    
+                    # Handle response
+                    if response is None:
+                        response_text = "I received no response. Please check the logs."
+                        st.error("Response was None - Check agent logs")
+                    elif hasattr(response, 'text'):
+                        response_text = response.text
+                        if response_text is None:
+                            response_text = "I couldn't generate a response text. Tool may have been called."
+                    else:
+                        response_text = str(response)
+                    
+                    response_placeholder.markdown(response_text)
+                    st.session_state.messages.append({"role": "assistant", "content": response_text})
                 except Exception as e:
-                    st.error(f"An error occurred: {e}")
+                    import traceback
+                    error_msg = f"Error: {str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+                    st.error(error_msg)
+                    print(error_msg)
 
 # --- MAIN PAGE: CALENDAR ---
 st.subheader("🗓️ Calendar View")
 
-events_json_str = list_events_json()
-events_list = json.loads(events_json_str)
-
-calendar_options = {
-    "editable": False,
-    # --- FIX START: Set TimeZone to Local ---
-    "timeZone": "local", 
-    # "local" tells the browser: "If the DB says 9:00, show it at 9:00 on MY clock."
-    # If you wanted to force Lisbon time regardless of where the user is, use "Europe/Lisbon"
-    # --- FIX END ---
-    "headerToolbar": {
-        "left": "today prev,next",
-        "center": "title",
-        "right": "dayGridMonth,timeGridWeek,timeGridDay,listMonth"
-    },
-    "initialView": "dayGridMonth",
-    "slotMinTime": "00:00:00",
-    "slotMaxTime": "24:00:00",
-    "height": "650px",
-}
-
-calendar(events=events_list, options=calendar_options, key=str(len(st.session_state.messages)))
+try:
+    events_json_str = list_events_json()
+    events_list = json.loads(events_json_str)
+    
+    # Debug: Show event count
+    st.caption(f"📊 {len(events_list)} events loaded")
+    
+    calendar_options = {
+        "editable": False,
+        "headerToolbar": {
+            "left": "today prev,next",
+            "center": "title",
+            "right": "dayGridMonth,timeGridWeek,timeGridDay,listMonth"
+        },
+        "initialView": "dayGridMonth",
+        "slotMinTime": "00:00:00",
+        "slotMaxTime": "24:00:00",
+        "height": "650px",
+    }
+    
+    calendar(events=events_list, options=calendar_options, key="agenda_calendar")
+except Exception as e:
+    st.error(f"Calendar Error: {e}")
+    import traceback
+    st.error(traceback.format_exc())
