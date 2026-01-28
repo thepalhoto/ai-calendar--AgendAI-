@@ -26,7 +26,7 @@ from tools.document_extraction import extract_events_from_image
 
 # Langfuse observability
 try:
-    from langfuse.decorators import observe
+    from langfuse import observe
     langfuse_available = True
 except ImportError:
     # Fallback: no-op decorator if langfuse unavailable
