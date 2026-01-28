@@ -22,6 +22,19 @@ if config_dir not in sys.path:
 # --- IMPORTS ---
 from src.agent import get_agent
 from tools.calendar_ops import list_events_json, add_event
+from tools.document_extraction import extract_events_from_image
+
+# Langfuse observability
+try:
+    from langfuse.decorators import observe
+    langfuse_available = True
+except ImportError:
+    # Fallback: no-op decorator if langfuse unavailable
+    def observe(name):
+        def decorator(func):
+            return func
+        return decorator
+    langfuse_available = False
 
 # --- INITIALIZE GENAI CLIENT ---
 # Load API Key for vision extraction
@@ -57,6 +70,50 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# --- HELPER: IMPORT EVENTS FROM IMAGE (WITH OBSERVABILITY) ---
+@observe(name="import_events_from_image")
+def process_and_import_image(image, user_hint=""):
+    """
+    Extract events from image and import them to calendar.
+    Wrapped with @observe for unified Langfuse tracking.
+    """
+    # Extract events from image
+    extracted_events = extract_events_from_image(
+        image=image,
+        genai_client=genai_client,
+        event_categories=EVENT_CATEGORIES,
+        vision_model_name=VISION_MODEL_NAME,
+        get_vision_prompt_fn=get_vision_prompt,
+        user_hint=user_hint
+    )
+    
+    added_titles = []
+    
+    if extracted_events:
+        for i, event in enumerate(extracted_events):
+            try:
+                title = event.get("title", "Untitled")
+                
+                # Get category and map to color
+                ai_category = event.get("category", "Other")
+                final_color = EVENT_CATEGORIES.get(ai_category, EVENT_CATEGORIES["Other"])
+                
+                # Add event to calendar
+                add_event(
+                    title=title,
+                    start=event.get("start"),
+                    end=event.get("end"),
+                    allDay=event.get("allDay", False),
+                    recurrence=event.get("recurrence", None),
+                    recurrence_end=event.get("recurrence_end", None),
+                    color=final_color 
+                )
+                added_titles.append(f"{title} ({ai_category})")
+            except Exception as e:
+                print(f"Failed to add {title}: {e}")
+    
+    return extracted_events, added_titles
+
 # --- INITIALIZE SESSION STATE ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -67,61 +124,6 @@ if "agent" not in st.session_state:
         st.session_state.messages.append({"role": "assistant", "content": "Hello! I'm AgendAI. How can I help you manage your schedule today?"})
     except Exception as e:
         st.error(f"Error initializing AI: {e}")
-
-# --- HELPER: VISION EXTRACTION ---
-def extract_events_from_image(image, user_hint=""):
-    """
-    Sends an image + user context to Gemini and asks for a strict JSON list with CATEGORIES.
-    """
-    if not genai_client:
-        st.error("API Key not configured for vision extraction.")
-        return []
-    
-    today = datetime.date.today()
-    
-    # 1. Calculate THIS week's Monday
-    start_of_week = today - datetime.timedelta(days=today.weekday())
-
-    # --- INTELLIGENT DATE SHIFT ---
-    if user_hint:
-        hint_lower = user_hint.lower()
-        if "next week" in hint_lower or "incoming week" in hint_lower:
-            start_of_week += datetime.timedelta(days=7)
-        elif "following week" in hint_lower:
-            start_of_week += datetime.timedelta(days=7)
-            
-    monday_str = start_of_week.strftime("%Y-%m-%d")
-    
-    # Extract valid keys for the prompt
-    valid_keys = ", ".join(EVENT_CATEGORIES.keys())
-    
-    # --- FETCH PROMPT FROM CONFIG ---
-    prompt = get_vision_prompt(monday_str, valid_keys, user_hint)
-    
-    try:
-        import io
-        
-        # Convert PIL Image to bytes
-        image_bytes = io.BytesIO()
-        image.save(image_bytes, format='JPEG')
-        image_bytes = image_bytes.getvalue()
-        
-        # Create response using the new API format
-        response = genai_client.models.generate_content(
-            model=VISION_MODEL_NAME,
-            contents=[
-                genai.types.Part.from_text(text=prompt),
-                genai.types.Part.from_data(
-                    data=image_bytes,
-                    mime_type='image/jpeg'
-                )
-            ]
-        )
-        text_data = response.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(text_data)
-    except Exception as e:
-        st.error(f"Vision Processing Error: {e}")
-        return []
 
 # --- SIDEBAR SETUP ---
 with st.sidebar:
@@ -134,54 +136,32 @@ with st.sidebar:
     if uploaded_file is not None:
         if st.button("Process Image", type="primary"): 
             with st.spinner("👀 Reading document..."):
-                image = Image.open(uploaded_file)
-                extracted_events = extract_events_from_image(image, user_hint)
-                
-                added_titles = [] 
-                
-                if extracted_events:
-                    progress_bar = st.progress(0)
-                    for i, event in enumerate(extracted_events):
-                        try:
-                            title = event.get("title", "Untitled")
-                            
-                            # --- COLOR ASSIGNMENT LOGIC ---
-                            # 1. Get the category AI found (e.g. "Work_School")
-                            ai_category = event.get("category", "Other")
-                            
-                            # 2. Map to Hex Code (e.g. "#0a9905")
-                            # Fallback to Grey if the AI hallucinates a new key
-                            final_color = EVENT_CATEGORIES.get(ai_category, EVENT_CATEGORIES["Other"])
-                            
-                            # 3. Force add with the specific color
-                            add_event(
-                                title=title,
-                                start=event.get("start"),
-                                end=event.get("end"),
-                                allDay=event.get("allDay", False),
-                                recurrence=event.get("recurrence", None),
-                                recurrence_end=event.get("recurrence_end", None),
-                                color=final_color 
-                            )
-                            added_titles.append(f"{title} ({ai_category})")
-                        except Exception as e:
-                            st.error(f"Failed to add {title}: {e}")
+                try:
+                    image = Image.open(uploaded_file)
+                    extracted_events, added_titles = process_and_import_image(
+                        image=image,
+                        user_hint=user_hint
+                    )
+                    
+                    if extracted_events:
+                        st.success(f"✅ Imported {len(added_titles)} events.")
                         
-                        progress_bar.progress((i + 1) / len(extracted_events))
-                    
-                    st.success(f"✅ Imported {len(added_titles)} events.")
-                    
-                    if added_titles:
-                        sync_text = f"SYSTEM UPDATE: Visual Import used. Added: {', '.join(added_titles)}."
-                        try:
-                            st.session_state.agent.send_message(sync_text)
-                            st.session_state.messages.append({"role": "assistant", "content": f"I've processed your image. Based on the titles, I categorized and colored **{len(added_titles)}** events."})
-                        except Exception as e:
-                            print(f"Sync Error: {e}")
-                    
-                    st.rerun()
-                else:
-                    st.warning("No events found in the image.")
+                        if added_titles:
+                            sync_text = f"SYSTEM UPDATE: Visual Import used. Added: {', '.join(added_titles)}."
+                            try:
+                                st.session_state.agent.send_message(sync_text)
+                                st.session_state.messages.append({"role": "assistant", "content": f"I've processed your image. Based on the titles, I categorized and colored **{len(added_titles)}** events."})
+                            except Exception as e:
+                                print(f"Sync Error: {e}")
+                        
+                        st.rerun()
+                    else:
+                        st.warning("No events found in the image.")
+                        
+                except ValueError as e:
+                    st.error(str(e))
+                except Exception as e:
+                    st.error(f"Vision Processing Error: {e}")
 
     st.markdown("---")
 
