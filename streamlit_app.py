@@ -1,7 +1,6 @@
 import streamlit as st
 from streamlit_calendar import calendar
 import json
-import datetime
 from PIL import Image
 import sys
 import os
@@ -20,7 +19,7 @@ if config_dir not in sys.path:
 
 # --- IMPORTS ---
 from src.agent import get_agent
-from tools.calendar_ops import list_events_json, add_event
+from tools.calendar_ops import add_event
 from tools.document_extraction import extract_events_from_image
 
 # Langfuse observability
@@ -222,7 +221,9 @@ with st.sidebar:
 st.subheader("🗓️ Calendar View")
 
 try:
-    events_json_str = list_events_json()
+    # Call internal function directly - always fresh, no observability pollution
+    from tools.calendar_ops import _fetch_events_from_db
+    events_json_str = _fetch_events_from_db()
     events_list = json.loads(events_json_str)
     
     calendar_options = {
