@@ -9,11 +9,11 @@ import io
 import base64
 from PIL import Image
 from google import genai
+from tools.api_client import get_genai_client
 
 
 def extract_events_from_image(
     image: Image.Image,
-    genai_client,
     event_categories: dict,
     vision_model_name: str,
     get_vision_prompt_fn,
@@ -24,7 +24,6 @@ def extract_events_from_image(
     
     Args:
         image: PIL Image object to process
-        genai_client: Initialized Google genai Client
         event_categories: Dict mapping category names to colors
         vision_model_name: Model to use for vision extraction
         get_vision_prompt_fn: Function that returns the vision prompt
@@ -33,8 +32,8 @@ def extract_events_from_image(
     Returns:
         List of extracted events as dicts, or empty list on error
     """
-    if not genai_client:
-        raise ValueError("API Key not configured for vision extraction.")
+    # Get the centralized API client
+    genai_client = get_genai_client()
     
     today = datetime.date.today()
     

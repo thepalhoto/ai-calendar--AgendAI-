@@ -1,7 +1,6 @@
 import os
 import sys
 import datetime
-from google import genai
 from dotenv import load_dotenv
 import traceback
 
@@ -25,18 +24,19 @@ if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
 # --- IMPORTS ---
+from tools.api_client import get_genai_client
 from tools.calendar_ops import add_event, list_events_json, delete_event, check_availability, get_conflicts_report
 from config.constants import get_color_rules_text, LLM_MODEL_NAME, LLM_TEMPERATURE
 from config.prompts import get_system_instruction
 
-# 1. Load API Key
+# 1. Load environment
 load_dotenv()
-api_key = os.getenv("GOOGLE_API_KEY")
-if not api_key:
-    raise ValueError("API Key not found! Check your .env file.")
 
-# 2. Initialize Client
-client = genai.Client(api_key=api_key)
+# 2. Get API client from centralized module
+try:
+    client = get_genai_client()
+except ValueError as e:
+    raise ValueError(f"Failed to initialize API client: {str(e)}")
 
 # 3. Register Tools
 tools_list = [add_event, list_events_json, delete_event, check_availability, get_conflicts_report]
@@ -107,7 +107,7 @@ def get_agent():
     # Create chat session with tools and system instruction
     chat = client.chats.create(
         model=LLM_MODEL_NAME,
-        config=genai.types.GenerateContentConfig(
+        config=__import__("google").genai.types.GenerateContentConfig(
             temperature=LLM_TEMPERATURE,
             system_instruction=SYSTEM_INSTRUCTION,
             tools=tools_list,

@@ -3,7 +3,6 @@ from streamlit_calendar import calendar
 import json
 import datetime
 from PIL import Image
-from google import genai
 import sys
 import os
 
@@ -36,17 +35,6 @@ except ImportError:
         return decorator
     langfuse_available = False
 
-# --- INITIALIZE GENAI CLIENT ---
-# Load API Key for vision extraction
-import os
-from dotenv import load_dotenv
-load_dotenv()
-api_key = os.getenv("GOOGLE_API_KEY")
-if api_key:
-    genai_client = genai.Client(api_key=api_key)
-else:
-    genai_client = None
-
 # Robust Import: Try package import first, fallback to direct
 # UPDATED: Now imports VISION_MODEL_NAME from constants
 try:
@@ -77,10 +65,9 @@ def process_and_import_image(image, user_hint=""):
     Extract events from image and import them to calendar.
     Wrapped with @observe for unified Langfuse tracking.
     """
-    # Extract events from image
+    # Extract events from image (genai_client is now managed internally)
     extracted_events = extract_events_from_image(
         image=image,
-        genai_client=genai_client,
         event_categories=EVENT_CATEGORIES,
         vision_model_name=VISION_MODEL_NAME,
         get_vision_prompt_fn=get_vision_prompt,
