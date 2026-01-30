@@ -1,7 +1,7 @@
 import sqlite3
 import json
 from tools.database_ops import get_db_connection
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # --- LANGFUSE SETUP (Optional, with fallback) ---
 try:
@@ -58,7 +58,9 @@ def _fetch_events_from_db() -> str:
                 "allDay": bool(row["allDay"]), 
                 "backgroundColor": row["backgroundColor"],
                 "borderColor": row["borderColor"],
-                "resourceId": row["resourceId"]
+                "resourceId": row["resourceId"],
+                "recurrence": row["recurrence"],
+                "recurrence_end": row["recurrence_end"]
             }
             
             # --- HANDLE RECURRENCE DURATION ---
@@ -225,73 +227,121 @@ def check_availability(check_datetime: str) -> str:
 @observe(as_type="tool")
 def get_conflicts_report() -> str:
     """
-    Analyzes the database for overlapping events.
-    Handles 'Split Series' by checking if recurrence ranges actually overlap.
-    Calls _fetch_events_from_db internally for fresh data.
+    Analyzes the database for overlapping events using a recurrence-expansion sweep.
+    Each conflicting pair is reported once, even if the events recur many times.
     """
     try:
         # Get fresh data without additional observability noise
         events_json = _fetch_events_from_db()
         events = json.loads(events_json)
-        
+        if not events:
+            return "✅ No conflicts found."
+
         conflicts = []
-        
-        def time_ranges_overlap(e1, e2):
-            if e1['allDay'] or e2['allDay']:
-                return True
-            
-            start1 = parse_dt(e1['start']).time()
-            end1 = parse_dt(e1['end']).time()
-            start2 = parse_dt(e2['start']).time()
-            end2 = parse_dt(e2['end']).time()
-            
-            return start1 < end2 and end1 > start2
+        conflict_pairs = set()
 
-        for i in range(len(events)):
-            for j in range(i + 1, len(events)):
-                e1 = events[i]
-                e2 = events[j]
-                
-                if not time_ranges_overlap(e1, e2):
-                    continue
+        def normalize_recurrence(value):
+            if not value:
+                return None
+            lowered = str(value).lower().strip()
+            return None if lowered in ("none", "null", "") else lowered
 
-                d1 = parse_dt(e1['start'])
-                d2 = parse_dt(e2['start'])
+        def parse_date_only(value):
+            if not value:
+                return None
+            lowered = str(value).lower().strip()
+            if lowered in ("none", "null", ""):
+                return None
+            return parse_dt(value).date()
 
-                # --- CASE 1: TWO RECURRING SERIES ---
-                if e1['recurrence'] == 'weekly' and e2['recurrence'] == 'weekly':
-                    if d1.weekday() == d2.weekday():
-                        s1_date = d1.date()
-                        s2_date = d2.date()
-                        
-                        e1_end_date = parse_dt(e1['recurrence_end']).date() if e1.get('recurrence_end') else datetime.max.date()
-                        e2_end_date = parse_dt(e2['recurrence_end']).date() if e2.get('recurrence_end') else datetime.max.date()
-                        
-                        if s1_date <= e2_end_date and e1_end_date >= s2_date:
-                             conflicts.append(f"⚠️ **Recurring Conflict:** '{e1['title']}' and '{e2['title']}' both repeat on {d1.strftime('%A')}s.")
+        def add_months(date_obj, months):
+            year = date_obj.year + (date_obj.month - 1 + months) // 12
+            month = (date_obj.month - 1 + months) % 12 + 1
+            # Clamp day to last day of month
+            from calendar import monthrange
+            day = min(date_obj.day, monthrange(year, month)[1])
+            return date_obj.replace(year=year, month=month, day=day)
 
-                # --- CASE 2: TWO SINGLE EVENTS ---
-                elif not e1['recurrence'] and not e2['recurrence']:
-                    if d1.date() == d2.date():
-                        conflicts.append(f"❌ **Date Conflict:** '{e1['title']}' overlaps with '{e2['title']}' on {d1.strftime('%Y-%m-%d')}.")
+        def iter_occurrences(event, horizon_end):
+            start_dt = parse_dt(event["start"])
+            end_dt = parse_dt(event["end"])
+            duration = end_dt - start_dt
 
-                # --- CASE 3: MIXED (One Single, One Recurring) ---
+            if event.get("allDay"):
+                start_dt = start_dt.replace(hour=0, minute=0, second=0)
+                duration = timedelta(hours=23, minutes=59, seconds=59)
+
+            rec = normalize_recurrence(event.get("recurrence"))
+            rec_end = parse_date_only(event.get("recurrence_end")) or horizon_end.date()
+
+            current_date = start_dt.date()
+            last_date = min(rec_end, horizon_end.date())
+
+            if not rec:
+                yield (start_dt, start_dt + duration)
+                return
+
+            while current_date <= last_date:
+                occ_start = datetime.combine(current_date, start_dt.time())
+                occ_end = occ_start + duration
+                yield (occ_start, occ_end)
+
+                if rec == "daily":
+                    current_date = current_date + timedelta(days=1)
+                elif rec == "weekly":
+                    current_date = current_date + timedelta(days=7)
+                elif rec == "monthly":
+                    current_date = add_months(current_date, 1)
+                elif rec == "yearly":
+                    current_date = add_months(current_date, 12)
                 else:
-                    single = e1 if not e1['recurrence'] else e2
-                    recurring = e1 if e1['recurrence'] else e2
-                    
-                    s_date = parse_dt(single['start']).date()
-                    r_start_date = parse_dt(recurring['start']).date()
-                    
-                    if s_date.weekday() == r_start_date.weekday():
-                        if s_date >= r_start_date:
-                            has_end = recurring['recurrence_end']
-                            if not has_end or s_date <= parse_dt(has_end).date():
-                                conflicts.append(f"⚠️ **Instance Conflict:** '{single['title']}' ({s_date}) overlaps with recurring '{recurring['title']}'.")
+                    # Unknown recurrence: treat as non-recurring
+                    break
+
+        def overlaps(a_start, a_end, b_start, b_end):
+            return a_start < b_end and a_end > b_start
+
+        # Determine horizon end to prevent infinite expansion
+        max_start = max(parse_dt(e["start"]) for e in events)
+        max_rec_end = None
+        for e in events:
+            rec_end = parse_date_only(e.get("recurrence_end"))
+            if rec_end:
+                rec_end_dt = datetime.combine(rec_end, datetime.max.time())
+                max_rec_end = max(rec_end_dt, max_rec_end) if max_rec_end else rec_end_dt
+        horizon_end = max_rec_end if max_rec_end else (max_start + timedelta(days=30))
+        horizon_end = max(horizon_end, max_start + timedelta(days=30))
+
+        # Build occurrences list
+        occurrences = []
+        for event in events:
+            for occ_start, occ_end in iter_occurrences(event, horizon_end):
+                occurrences.append({
+                    "event_id": event["id"],
+                    "title": event["title"],
+                    "start": occ_start,
+                    "end": occ_end,
+                })
+
+        # Sweep line to detect overlaps efficiently
+        occurrences.sort(key=lambda x: x["start"])
+        active = []
+
+        for occ in occurrences:
+            active = [a for a in active if a["end"] > occ["start"]]
+            for a in active:
+                if overlaps(a["start"], a["end"], occ["start"], occ["end"]):
+                    pair = tuple(sorted((a["event_id"], occ["event_id"])))
+                    if pair not in conflict_pairs:
+                        conflict_pairs.add(pair)
+                        conflicts.append(
+                            f"⚠️ **Conflict:** '{a['title']}' overlaps with '{occ['title']}' (e.g., {occ['start'].strftime('%Y-%m-%d %H:%M')})."
+                        )
+            active.append(occ)
 
         if not conflicts:
             return "✅ No conflicts found."
-        
+
         return "\n\n".join(conflicts)
 
     except Exception as e:

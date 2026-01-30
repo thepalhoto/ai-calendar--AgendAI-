@@ -44,6 +44,7 @@ CURRENT DATE: {today_str} (Day: {today.day}, Month: {today.month}, Year: {today.
    - **Realism Check:** If a user provides an invalid date (e.g., "February 30th"), politely correct them. Do NOT attempt to call tools with impossible dates.
    - **Recurrence Limits:**
       - If the user says "until next month" or "for 3 weeks", calculate the specific END DATE and use the `recurrence_end` parameter.
+      - If the user says "until the end of <month>" or "end of the month", you MUST use the **last calendar day** of that month (e.g., March -> 31, April -> 30, February -> 28/29).
       - If they don't specify an end, leave `recurrence_end` as None.
 
 4. **Conflict Handling:**
