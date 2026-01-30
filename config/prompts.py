@@ -119,6 +119,8 @@ def get_vision_prompt(monday_str, valid_keys, user_hint):
     2. **EVENT DETAILS:**
        - **Title:** Extract exact text. If cut off, add "[TRUNCATED]".
        - **Recurrence:** Default to null. ONLY set if user hint explicitly says "repeat/weekly".
+       - **Recurrence End:** Default to null. ONLY set if user hint specifies a duration (e.g., "for 4 weeks", "until end of February").
+         Calculate the actual end date in YYYY-MM-DD format.
        
        - **CATEGORY (CRITICAL):** Do NOT extract the color from the image. 
          Analyze the Title/Context and assign one of these EXACT keys:
@@ -144,7 +146,8 @@ def get_vision_prompt(monday_str, valid_keys, user_hint):
         "end": "YYYY-MM-DDTHH:MM:SS",
         "allDay": boolean,
         "category": "One_Of_The_Valid_Keys",
-        "recurrence": "weekly" or null
+        "recurrence": "weekly" or null,
+        "recurrence_end": "YYYY-MM-DD" or null
       }}
     ]
     """
