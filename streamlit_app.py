@@ -21,6 +21,7 @@ if config_dir not in sys.path:
 from src.agent import get_agent
 from tools.calendar_ops import add_event
 from tools.document_extraction import extract_events_from_image
+from tools.database_ops import verify_user, get_user_info
 
 # Langfuse observability
 try:
@@ -48,6 +49,86 @@ except ImportError:
         EVENT_CATEGORIES = {"Other": "#999999"}
         VISION_MODEL_NAME = "gemini-2.0-flash" # Fallback default
         st.error("⚠️ Could not load config. Defaulting to Grey & Default Vision Model.")
+
+# --- AUTHENTICATION ---
+from tools.database_ops import verify_user, get_user_info, create_user
+
+# Initialize session state for authentication
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+if 'user_id' not in st.session_state:
+    st.session_state.user_id = None
+if 'username' not in st.session_state:
+    st.session_state.username = None
+if 'show_signup' not in st.session_state:
+    st.session_state.show_signup = False
+
+# Login/Signup Form (shown if not authenticated)
+if not st.session_state.authenticated:
+    st.markdown("<h1 style='text-align: center;'>📅 AgendAI</h1>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        # Toggle between Login and Signup
+        tab1, tab2 = st.tabs(["🔐 Login", "✨ Sign Up"])
+        
+        with tab1:
+            with st.form("login_form"):
+                st.subheader("Login to your calendar")
+                username = st.text_input("Username", key="login_username")
+                password = st.text_input("Password", type="password", key="login_password")
+                submit = st.form_submit_button("Login", use_container_width=True)
+                
+                if submit:
+                    if username and password:
+                        authenticated, user_id = verify_user(username, password)
+                        if authenticated:
+                            st.session_state.authenticated = True
+                            st.session_state.user_id = user_id
+                            st.session_state.username = username
+                            st.success(f"Welcome back, {username}!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Invalid username or password")
+                    else:
+                        st.warning("Please enter both username and password")
+        
+        with tab2:
+            with st.form("signup_form"):
+                st.subheader("Create a new account")
+                new_username = st.text_input("Username", key="signup_username", 
+                                            help="Choose a unique username")
+                new_email = st.text_input("Email", key="signup_email",
+                                         help="Enter a valid email address")
+                new_password = st.text_input("Password", type="password", key="signup_password",
+                                            help="Choose a strong password")
+                confirm_password = st.text_input("Confirm Password", type="password", 
+                                                key="signup_confirm",
+                                                help="Re-enter your password")
+                signup_submit = st.form_submit_button("Create Account", use_container_width=True)
+                
+                if signup_submit:
+                    # Validation
+                    if not new_username or not new_email or not new_password:
+                        st.error("❌ All fields are required")
+                    elif len(new_username) < 3:
+                        st.error("❌ Username must be at least 3 characters")
+                    elif len(new_password) < 6:
+                        st.error("❌ Password must be at least 6 characters")
+                    elif new_password != confirm_password:
+                        st.error("❌ Passwords don't match")
+                    elif '@' not in new_email or '.' not in new_email:
+                        st.error("❌ Please enter a valid email address")
+                    else:
+                        # Try to create user
+                        success, message = create_user(new_username, new_password, new_email)
+                        if success:
+                            st.success(f"✅ {message}")
+                            st.info("👉 Please go to the Login tab to sign in")
+                        else:
+                            st.error(f"❌ {message}")
+    
+    st.stop()  # Don't show rest of app until logged in
 
 # --- PAGE SETUP ---
 st.set_page_config(page_title="AgendAI", layout="wide")
@@ -86,14 +167,15 @@ def process_and_import_image(image, user_hint=""):
                 
                 # Add event to calendar
                 add_event(
-                    title=title,
-                    start=event.get("start"),
-                    end=event.get("end"),
-                    allDay=event.get("allDay", False),
-                    recurrence=event.get("recurrence", None),
-                    recurrence_end=event.get("recurrence_end", None),
-                    color=final_color 
-                )
+                title=title,
+                start=event.get("start"),
+                end=event.get("end"),
+                allDay=event.get("allDay", False),
+                user_id=st.session_state.user_id,  # ADD THIS
+                recurrence=event.get("recurrence", None),
+                recurrence_end=event.get("recurrence_end", None),
+                color=final_color 
+            )
                 added_titles.append(f"{title} ({ai_category})")
             except Exception as e:
                 print(f"Failed to add {title}: {e}")
@@ -113,6 +195,17 @@ if "agent" not in st.session_state:
 
 # --- SIDEBAR SETUP ---
 with st.sidebar:
+    # User info and logout at the top
+    st.markdown(f"👤 **{st.session_state.username}**")
+    if st.button("🚪 Logout"):
+        st.session_state.authenticated = False
+        st.session_state.user_id = None
+        st.session_state.username = None
+        st.session_state.messages = []
+        st.rerun()
+    
+    st.markdown("---")
+    
     # 1. VISUAL IMPORT
     st.header("📷 Visual Import")
     
@@ -121,7 +214,7 @@ with st.sidebar:
     
     if uploaded_file is not None:
         if st.button("Process Image", type="primary"): 
-            with st.spinner("👀 Reading document..."):
+            with st.spinner("Reading document..."):
                 try:
                     image = Image.open(uploaded_file)
                     extracted_events, added_titles = process_and_import_image(
@@ -158,7 +251,7 @@ with st.sidebar:
         with st.spinner("Analyzing schedule logic..."):
             try:
                 from tools.calendar_ops import get_conflicts_report
-                report = get_conflicts_report()
+                report = get_conflicts_report(st.session_state.user_id)  # ADD user_id
                 
                 if "No conflicts" in report:
                     st.success(report)
@@ -221,9 +314,8 @@ with st.sidebar:
 st.subheader("🗓️ Calendar View")
 
 try:
-    # Call internal function directly - always fresh, no observability pollution
     from tools.calendar_ops import _fetch_events_from_db
-    events_json_str = _fetch_events_from_db()
+    events_json_str = _fetch_events_from_db(st.session_state.user_id)  # ADD user_id
     events_list = json.loads(events_json_str)
     
     calendar_options = {

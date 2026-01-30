@@ -32,11 +32,12 @@ def parse_dt(dt_str: str) -> datetime:
 
 # --- INTERNAL DATABASE FUNCTION (NO OBSERVABILITY) ---
 
-def _fetch_events_from_db() -> str:
+def _fetch_events_from_db(user_id: int = None) -> str:
     """
     Internal function to fetch events from database.
-    Called by both list_events_json (with observability) and UI (without).
-    No @observe decorator - raw database access only.
+    
+    Args:
+        user_id: If provided, filter events for this user only
     
     Returns:
         str: JSON string of events
@@ -44,7 +45,12 @@ def _fetch_events_from_db() -> str:
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM events")
+        
+        if user_id:
+            cursor.execute("SELECT * FROM events WHERE user_id = ?", (user_id,))
+        else:
+            cursor.execute("SELECT * FROM events")
+            
         rows = cursor.fetchall()
         conn.close()
         
@@ -100,10 +106,10 @@ def _fetch_events_from_db() -> str:
 # --- CORE FUNCTIONS ---
 
 @observe(as_type="tool")
-def add_event(title: str, start: str, end: str, allDay: bool, recurrence: str = None, recurrence_end: str = None, color: str = "#3788d8") -> str:
+def add_event(title: str, start: str, end: str, allDay: bool, user_id: int, 
+              recurrence: str = None, recurrence_end: str = None, color: str = "#3788d8") -> str:
     """
-    Adds a new event.
-    Forces dates to be 'Naive' (Floating) to prevent DST shifts.
+    Adds a new event for a specific user.
     """
     try:
         conn = get_db_connection()
@@ -125,8 +131,8 @@ def add_event(title: str, start: str, end: str, allDay: bool, recurrence: str = 
         clean_end = make_naive_iso(end)
 
         cursor.execute(
-            "SELECT id FROM events WHERE title = ? AND start = ?", 
-            (title, clean_start)
+            "SELECT id FROM events WHERE title = ? AND start = ? AND user_id = ?", 
+            (title, clean_start, user_id)
         )
         if cursor.fetchone():
             conn.close()
@@ -136,10 +142,10 @@ def add_event(title: str, start: str, end: str, allDay: bool, recurrence: str = 
         
         cursor.execute(
         """INSERT INTO events 
-           (title, start, end, allDay, recurrence, recurrence_end, backgroundColor, borderColor, resourceId) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (title, clean_start, clean_end, is_all_day, recurrence, recurrence_end, color, color, "a")
-    )
+           (user_id, title, start, end, allDay, recurrence, recurrence_end, backgroundColor, borderColor, resourceId) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (user_id, title, clean_start, clean_end, is_all_day, recurrence, recurrence_end, color, color, "a")
+        )
         
         conn.commit()
         conn.close()
@@ -150,55 +156,25 @@ def add_event(title: str, start: str, end: str, allDay: bool, recurrence: str = 
         return f"Error adding event: {str(e)}"
 
 @observe(as_type="tool")
-def list_events_json() -> str:
-    """
-    Fetches ALL events from the database and formats them into the specific JSON structure 
-    required by the frontend calendar widget.
-
-    This is the AGENT-FACING function. It calls the internal _fetch_events_from_db() 
-    and is decorated with @observe so Agent calls are tracked in Langfuse.
-
-    ---------------------------------------------------------------------------
-    CRITICAL EFFICIENCY RULES (DO NOT CALL UNLESS NECESSARY)
-    ---------------------------------------------------------------------------
-    You should NOT call this tool for every single user message. Only use it when
-    you strictly need to 'read' the schedule to answer a question or perform an ID lookup.
-
-    WHEN TO CALL THIS TOOL:
-      1. User asks "What am I doing today?", "Show my schedule", or "Do I have free time?".
-      2. User asks to "Delete [Event Name]" -> You MUST call this to find the Event ID first.
-      3. User asks "Do I have any conflicts?" -> You need the list to check.
-      4. User asks for a summary of past/future events.
-
-    WHEN TO SKIP THIS TOOL (SAVE RESOURCES):
-      1. User says "Add a meeting at 2pm" -> Just call `add_event` directly. Do NOT check availability first unless asked.
-      2. User says "Hello" or "Who are you?" -> No database access needed.
-      3. User provides a SYSTEM UPDATE (Visual Import) -> The events are already added.
-
-    ---------------------------------------------------------------------------
-    
-    Returns:
-        str: A JSON string representing a list of event objects (via _fetch_events_from_db).
-    """
-    return _fetch_events_from_db()
+def list_events_json(user_id: int) -> str:
+    """Fetches events for a specific user"""
+    return _fetch_events_from_db(user_id)
 
 @observe(as_type="tool")
-def delete_event(event_id: int) -> str:
-    """
-    Deletes an event by its ID.
-    """
+def delete_event(event_id: int, user_id: int) -> str:
+    """Deletes an event (only if it belongs to the user)"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        cursor.execute("SELECT title FROM events WHERE id = ?", (event_id,))
+        cursor.execute("SELECT title FROM events WHERE id = ? AND user_id = ?", (event_id, user_id))
         event = cursor.fetchone()
         
         if not event:
             conn.close()
-            return f"Error: Event ID {event_id} not found."
+            return f"Error: Event ID {event_id} not found or you don't have permission."
             
-        cursor.execute("DELETE FROM events WHERE id = ?", (event_id,))
+        cursor.execute("DELETE FROM events WHERE id = ? AND user_id = ?", (event_id, user_id))
         conn.commit()
         conn.close()
         return f"Success: Event '{event['title']}' deleted."
@@ -206,14 +182,12 @@ def delete_event(event_id: int) -> str:
         return f"Error deleting event: {str(e)}"
 
 @observe(as_type="tool")
-def check_availability(check_datetime: str) -> str:
-    """
-    Simple check to see if any non-allDay event starts exactly at this time.
-    """
+def check_availability(check_datetime: str, user_id: int) -> str:
+    """Check availability for a specific user"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT title FROM events WHERE start = ?", (check_datetime,))
+        cursor.execute("SELECT title FROM events WHERE start = ? AND user_id = ?", (check_datetime, user_id))
         event = cursor.fetchone()
         conn.close()
         
@@ -225,14 +199,10 @@ def check_availability(check_datetime: str) -> str:
         return f"Error checking availability: {str(e)}"
 
 @observe(as_type="tool")
-def get_conflicts_report() -> str:
-    """
-    Analyzes the database for overlapping events using a recurrence-expansion sweep.
-    Each conflicting pair is reported once, even if the events recur many times.
-    """
+def get_conflicts_report(user_id: int) -> str:
+    """Analyzes conflicts for a specific user"""
     try:
-        # Get fresh data without additional observability noise
-        events_json = _fetch_events_from_db()
+        events_json = _fetch_events_from_db(user_id)
         events = json.loads(events_json)
         if not events:
             return "✅ No conflicts found."
@@ -332,6 +302,8 @@ def get_conflicts_report() -> str:
             for a in active:
                 if overlaps(a["start"], a["end"], occ["start"], occ["end"]):
                     pair = tuple(sorted((a["event_id"], occ["event_id"])))
+
+
                     if pair not in conflict_pairs:
                         conflict_pairs.add(pair)
                         conflicts.append(

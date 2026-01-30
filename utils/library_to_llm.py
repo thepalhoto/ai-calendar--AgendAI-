@@ -41,8 +41,9 @@ def create_llm_dump(library_path, output_file):
 
 # If you don't know the path, run this import trick first:
 #import google.genai
-# print(f"Library is at: {os.path.dirname(google.genai.__file__)}")
-# Then copy that path below:
-# create_llm_dump(os.path.dirname(google.genai.__file__), "library_dump.txt")
+#import streamlit_authenticator 
 
-create_llm_dump("C:\\Users\\User\\Documents\\NOVAIMS\\Ano-3\\CapstoneProject\\CProject_2_epoch\\ai_course_env\\lib\\site-packages\\google\\genai", "genai_dump.txt")
+#print(f"Library is at: {os.path.dirname(streamlit_authenticator.__file__)}")
+
+# Then copy that path below:
+#create_llm_dump(os.path.dirname(streamlit_authenticator.__file__), "stauth_dump.txt")
