@@ -32,36 +32,48 @@ def parse_dt(dt_str: str) -> datetime:
 
 # --- INTERNAL DATABASE FUNCTION (NO OBSERVABILITY) ---
 
-def _fetch_events_from_db(user_id: int = None) -> str:
+def _fetch_events_from_db(user_id: int) -> str:
     """
     Internal function to fetch events from database.
-    
-    Args:
-        user_id: If provided, filter events for this user only
-    
-    Returns:
-        str: JSON string of events
+    Includes fix for All-Day event rendering and duration calculation.
     """
     try:
         conn = get_db_connection()
+        # Ensure row_factory is Row so we can access by column name
+        conn.row_factory = sqlite3.Row 
         cursor = conn.cursor()
         
-        if user_id:
-            cursor.execute("SELECT * FROM events WHERE user_id = ?", (user_id,))
-        else:
-            cursor.execute("SELECT * FROM events")
+        cursor.execute("SELECT * FROM events WHERE user_id = ?", (user_id,))
             
         rows = cursor.fetchall()
         conn.close()
         
         events = []
         for row in rows:
+            # Basic data mapping
+            is_all_day = bool(row["allDay"])
+            start_str = row["start"]
+            end_str = row["end"]
+
+            # --- FIX: EXCLUSIVE END DATE FOR ALL-DAY EVENTS ---
+            # If it's all-day, FullCalendar needs the 'end' to be the start of the NEXT day
+            if is_all_day and end_str:
+                try:
+                    # Parse current end (e.g., "2026-02-01 23:59:59" or "2026-02-01")
+                    # We only care about the date part for the shift
+                    end_dt = parse_dt(end_str) 
+                    # Add 1 day and set to midnight
+                    actual_end = (end_dt + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+                    end_str = actual_end
+                except Exception as e:
+                    print(f"Error adjusting allDay end date: {e}")
+
             event_dict = {
                 "id": row["id"],
                 "title": row["title"],
-                "start": row["start"],
-                "end": row["end"],
-                "allDay": bool(row["allDay"]), 
+                "start": start_str,
+                "end": end_str,
+                "allDay": is_all_day, 
                 "backgroundColor": row["backgroundColor"],
                 "borderColor": row["borderColor"],
                 "resourceId": row["resourceId"],
@@ -71,27 +83,42 @@ def _fetch_events_from_db(user_id: int = None) -> str:
             
             # --- HANDLE RECURRENCE DURATION ---
             if row["recurrence"] and row["recurrence"].lower() != "none":
+                # Map user-friendly strings to RRule constants
+                freq_map = {
+                    "daily": "daily",
+                    "weekly": "weekly",
+                    "monthly": "monthly",
+                    "yearly": "yearly"
+                }
+                
+                selected_freq = freq_map.get(row["recurrence"].lower(), "daily")
+
+                # IMPORTANT: RRule often needs the start date without the "-" or ":" 
+                # for some versions, but let's try the standardized dict first.
                 rule = {
-                    "freq": row["recurrence"].lower(),
+                    "freq": selected_freq,
                     "dtstart": row["start"] 
                 }
                 
-                if "recurrence_end" in row.keys() and row["recurrence_end"] and row["recurrence_end"] != "None":
+                if "recurrence_end" in row.keys() and row["recurrence_end"] and str(row["recurrence_end"]) != "None":
                     rule["until"] = row["recurrence_end"]
 
                 event_dict["rrule"] = rule
                 
-                # 2. CALCULATE DURATION
+                # FullCalendar needs a 'duration' if using rrule, or it defaults to 0
                 try:
                     s = parse_dt(row["start"])
                     e = parse_dt(row["end"])
                     
                     delta = e - s
-                    total_seconds = int(delta.total_seconds())
-                    hours = total_seconds // 3600
-                    minutes = (total_seconds % 3600) // 60
-                    
-                    event_dict["duration"] = f"{hours:02}:{minutes:02}"
+                    # For all-day events, ensure duration is at least 24 hours
+                    if is_all_day:
+                        event_dict["duration"] = "24:00"
+                    else:
+                        total_seconds = int(delta.total_seconds())
+                        hours = total_seconds // 3600
+                        minutes = (total_seconds % 3600) // 60
+                        event_dict["duration"] = f"{hours:02}:{minutes:02}"
                     
                 except Exception as e:
                     print(f"Error calculating duration for {row['title']}: {e}")
@@ -157,7 +184,7 @@ def add_event(title: str, start: str, end: str, allDay: bool, user_id: int,
 
 @observe(as_type="tool")
 def list_events_json(user_id: int) -> str:
-    """Fetches events for a specific user"""
+    """Fetches events ONLY for the specific user_id provided."""
     return _fetch_events_from_db(user_id)
 
 @observe(as_type="tool")

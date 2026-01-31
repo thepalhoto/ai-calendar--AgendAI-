@@ -42,8 +42,8 @@ try:
     from config.prompts import get_vision_prompt
 except ImportError:
     try:
-        from constants import EVENT_CATEGORIES, VISION_MODEL_NAME
-        from prompts import get_vision_prompt
+        from config.constants import EVENT_CATEGORIES, VISION_MODEL_NAME
+        from config.prompts import get_vision_prompt
     except ImportError:
         # Fallback if config is totally missing (prevents crash)
         EVENT_CATEGORIES = {"Other": "#999999"}
@@ -186,10 +186,14 @@ def process_and_import_image(image, user_hint=""):
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-if "agent" not in st.session_state:
+if st.session_state.authenticated and "agent" not in st.session_state:
     try:
-        st.session_state.agent = get_agent()
-        st.session_state.messages.append({"role": "assistant", "content": "Hello! I'm AgendAI. How can I help you manage your schedule today?"})
+        # Pass the user_id to the agent so it can use it for tools
+        st.session_state.agent = get_agent(st.session_state.user_id, st.session_state.username)
+        st.session_state.messages.append({
+            "role": "assistant", 
+            "content": f"Hello {st.session_state.username}! I'm AgendAI. How can I help you manage your schedule today?"
+        })
     except Exception as e:
         st.error(f"Error initializing AI: {e}")
 
@@ -198,10 +202,9 @@ with st.sidebar:
     # User info and logout at the top
     st.markdown(f"👤 **{st.session_state.username}**")
     if st.button("🚪 Logout"):
-        st.session_state.authenticated = False
-        st.session_state.user_id = None
-        st.session_state.username = None
-        st.session_state.messages = []
+        # 1. Wipe the entire temporary whiteboard
+        st.session_state.clear() 
+        # 2. Force the app to restart from the beginning (login screen)
         st.rerun()
     
     st.markdown("---")

@@ -100,19 +100,45 @@ class LangfuseWrapper:
                     self.text = txt
             return ErrorResponse(f"Error: {str(e)}")
 
-def get_agent():
+def get_agent(user_id: int, username: str) -> LangfuseWrapper:
     """
-    Initializes and returns the Gemini Chat Session WRAPPED for tracing.
+    Initializes and returns the Gemini Chat Session with dynamic date awareness and user security.
     """
-    # Create chat session with tools and system instruction
+    # 1. Get current time context
+    now = datetime.datetime.now()
+    today_date = now.strftime("%A, %B %d, %Y")
+    current_time = now.strftime("%H:%M")
+    
+    # 2. Define the dynamic context and security rule
+    # We add the date here so the AI knows what "tomorrow" means relative to right now.
+    security_instruction = f"""
+    ### TEMPORAL CONTEXT:
+    - Today's Date is: {today_date}
+    - Current Time is: {current_time}
+
+    ### PERSONALIZATION:
+    - You are talking to {username}. Address them by name occasionally.
+
+    ### SECURITY RULE:
+    - The current user's ID is {user_id}.
+    - You MUST use user_id={user_id} for EVERY tool call.
+    - NEVER fetch or modify data for any other user ID.
+    - When adding events, if the user gives a relative date (e.g. 'tomorrow'), 
+      calculate the date based on {today_date}.
+    """
+
+    # 3. COMBINE THEM
+    # Ensure SYSTEM_INSTRUCTION is defined globally or imported
+    full_instruction = SYSTEM_INSTRUCTION + security_instruction
+
+    # 4. Pass 'full_instruction' to the model
     chat = client.chats.create(
         model=LLM_MODEL_NAME,
         config=__import__("google").genai.types.GenerateContentConfig(
             temperature=LLM_TEMPERATURE,
-            system_instruction=SYSTEM_INSTRUCTION,
+            system_instruction=full_instruction,
             tools=tools_list,
         )
     )
     
-    # Return the Wrapper, not the raw chat
     return LangfuseWrapper(chat)
