@@ -21,7 +21,7 @@ if config_dir not in sys.path:
 from src.agent import get_agent
 from tools.calendar_ops import add_event
 from tools.document_extraction import extract_events_from_image
-from tools.database_ops import verify_user, get_user_info
+from tools.database_ops import verify_user
 
 # Langfuse observability
 try:
@@ -51,7 +51,7 @@ except ImportError:
         st.error("⚠️ Could not load config. Defaulting to Grey & Default Vision Model.")
 
 # --- AUTHENTICATION ---
-from tools.database_ops import verify_user, get_user_info, create_user
+from tools.database_ops import verify_user, create_user
 
 # Initialize session state for authentication
 if 'authenticated' not in st.session_state:
