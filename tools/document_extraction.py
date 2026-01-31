@@ -10,8 +10,9 @@ import base64
 from PIL import Image
 from google import genai
 from tools.api_client import get_genai_client
+from langfuse import observe
 
-
+@observe(name="Tool: Vision Extraction")
 def extract_events_from_image(
     image: Image.Image,
     event_categories: dict,

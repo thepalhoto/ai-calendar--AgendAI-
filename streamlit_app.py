@@ -1,27 +1,27 @@
 import streamlit as st
 from streamlit_calendar import calendar
-import json
-from PIL import Image
-import sys
 import os
+import sys
 
-# --- PATH SETUP (BULLETPROOF) ---
-# 1. Get path to Root
+# --- 1. PATH SETUP FIRST ---
+# Get the absolute path to the directory where streamlit_app.py lives
 root_dir = os.path.dirname(os.path.abspath(__file__))
-# 2. Get path to Config
+
+# Define all key directories
 config_dir = os.path.join(root_dir, 'config')
+services_dir = os.path.join(root_dir, 'services')
+tools_dir = os.path.join(root_dir, 'tools')
 
-# 3. Add both to sys.path to ensure imports work
-if root_dir not in sys.path:
-    sys.path.insert(0, root_dir)
-if config_dir not in sys.path:
-    sys.path.insert(0, config_dir)
+# Add them to sys.path
+for d in [root_dir, config_dir, services_dir, tools_dir]:
+    if d not in sys.path:
+        sys.path.insert(0, d)
 
-# --- IMPORTS ---
+# --- 2. CUSTOM IMPORTS SECOND ---
+# Now that Python knows where 'services' and 'tools' are, we can import them
+from services.calendar_service import CalendarService
 from src.agent import get_agent
-from tools.calendar_ops import add_event
-from tools.document_extraction import extract_events_from_image
-from tools.database_ops import verify_user
+from tools.database_ops import verify_user, create_user
 
 # Langfuse observability
 try:
@@ -138,49 +138,6 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# --- HELPER: IMPORT EVENTS FROM IMAGE (WITH OBSERVABILITY) ---
-@observe(name="import_events_from_image")
-def process_and_import_image(image, user_hint=""):
-    """
-    Extract events from image and import them to calendar.
-    Wrapped with @observe for unified Langfuse tracking.
-    """
-    # Extract events from image (genai_client is now managed internally)
-    extracted_events = extract_events_from_image(
-        image=image,
-        event_categories=EVENT_CATEGORIES,
-        vision_model_name=VISION_MODEL_NAME,
-        get_vision_prompt_fn=get_vision_prompt,
-        user_hint=user_hint
-    )
-    
-    added_titles = []
-    
-    if extracted_events:
-        for i, event in enumerate(extracted_events):
-            try:
-                title = event.get("title", "Untitled")
-                
-                # Get category and map to color
-                ai_category = event.get("category", "Other")
-                final_color = EVENT_CATEGORIES.get(ai_category, EVENT_CATEGORIES["Other"])
-                
-                # Add event to calendar
-                add_event(
-                title=title,
-                start=event.get("start"),
-                end=event.get("end"),
-                allDay=event.get("allDay", False),
-                user_id=st.session_state.user_id,  # ADD THIS
-                recurrence=event.get("recurrence", None),
-                recurrence_end=event.get("recurrence_end", None),
-                color=final_color 
-            )
-                added_titles.append(f"{title} ({ai_category})")
-            except Exception as e:
-                print(f"Failed to add {title}: {e}")
-    
-    return extracted_events, added_titles
 
 # --- INITIALIZE SESSION STATE ---
 if "messages" not in st.session_state:
@@ -209,7 +166,7 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # 1. VISUAL IMPORT
+# 1. VISUAL IMPORT
     st.header("📷 Visual Import")
     
     uploaded_file = st.file_uploader("Upload schedule image", type=["png", "jpg", "jpeg", "webp"])
@@ -217,31 +174,36 @@ with st.sidebar:
     
     if uploaded_file is not None:
         if st.button("Process Image", type="primary"): 
-            with st.spinner("Reading document..."):
+            with st.spinner("Analyzing the document..."):
                 try:
-                    image = Image.open(uploaded_file)
-                    extracted_events, added_titles = process_and_import_image(
-                        image=image,
-                        user_hint=user_hint
+                    # ONE CALL to rule them all:
+                    added_titles = CalendarService.process_and_save_visual_import(
+                        uploaded_file=uploaded_file,
+                        user_id=st.session_state.user_id,
+                        categories=EVENT_CATEGORIES, # Ensure this is defined in your constants
+                        model_name=VISION_MODEL_NAME, # Ensure this is defined
+                        prompt_fn=get_vision_prompt,  # Your prompt function
+                        hint=user_hint
                     )
                     
-                    if extracted_events:
+                    if added_titles:
                         st.success(f"✅ Imported {len(added_titles)} events.")
                         
-                        if added_titles:
-                            sync_text = f"SYSTEM UPDATE: Visual Import used. Added: {', '.join(added_titles)}."
-                            try:
-                                st.session_state.agent.send_message(sync_text)
-                                st.session_state.messages.append({"role": "assistant", "content": f"I've processed your image. Based on the titles, I categorized and colored **{len(added_titles)}** events."})
-                            except Exception as e:
-                                print(f"Sync Error: {e}")
-                        
+                        # Keeping your cool Agent Sync logic
+                        sync_text = f"SYSTEM UPDATE: Visual Import used. Added: {', '.join(added_titles)}."
+                        try:
+                            st.session_state.agent.send_message(sync_text)
+                            st.session_state.messages.append({
+                                "role": "assistant", 
+                                "content": f"I've processed your image and added **{len(added_titles)}** events to your calendar."
+                            })
+                        except Exception:
+                            pass # Silent fail for sync is fine
+                            
                         st.rerun()
                     else:
                         st.warning("No events found in the image.")
                         
-                except ValueError as e:
-                    st.error(str(e))
                 except Exception as e:
                     st.error(f"Vision Processing Error: {e}")
 
@@ -314,12 +276,9 @@ with st.sidebar:
                     print(error_msg)
 
 # --- MAIN PAGE: CALENDAR ---
-st.subheader("🗓️ Calendar View")
-
 try:
-    from tools.calendar_ops import _fetch_events_from_db
-    events_json_str = _fetch_events_from_db(st.session_state.user_id)  # ADD user_id
-    events_list = json.loads(events_json_str)
+    # Use the service to get a clean list of events (it handles the JSON parsing)
+    events_list = CalendarService.get_ui_events(st.session_state.user_id)
     
     calendar_options = {
         "editable": False,
@@ -335,7 +294,8 @@ try:
     }
     
     calendar(events=events_list, options=calendar_options, key="agenda_calendar")
+
 except Exception as e:
-    st.error(f"Calendar Error: {e}")
+    st.error(f"Error loading calendar: {e}")
     import traceback
     st.error(traceback.format_exc())
