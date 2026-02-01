@@ -21,7 +21,6 @@ for d in [root_dir, config_dir, services_dir, tools_dir]:
 # Now that Python knows where 'services' and 'tools' are, we can import them
 from services.calendar_service import CalendarService
 from src.agent import get_agent
-from tools.database_ops import verify_user, create_user
 
 # Langfuse observability
 try:
@@ -51,8 +50,6 @@ except ImportError:
         st.error("⚠️ Could not load config. Defaulting to Grey & Default Vision Model.")
 
 # --- AUTHENTICATION ---
-from tools.database_ops import verify_user, create_user
-
 # Initialize session state for authentication
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
@@ -81,7 +78,7 @@ if not st.session_state.authenticated:
                 
                 if submit:
                     if username and password:
-                        authenticated, user_id = verify_user(username, password)
+                        authenticated, user_id = CalendarService.authenticate(username, password)
                         if authenticated:
                             st.session_state.authenticated = True
                             st.session_state.user_id = user_id
@@ -121,7 +118,7 @@ if not st.session_state.authenticated:
                         st.error("❌ Please enter a valid email address")
                     else:
                         # Try to create user
-                        success, message = create_user(new_username, new_password, new_email)
+                        success, message = CalendarService.register_user(new_username, new_password, new_email)
                         if success:
                             st.success(f"✅ {message}")
                             st.info("👉 Please go to the Login tab to sign in")
@@ -176,34 +173,25 @@ with st.sidebar:
         if st.button("Process Image", type="primary"): 
             with st.spinner("Analyzing the document..."):
                 try:
-                    # ONE CALL to rule them all:
-                    added_titles = CalendarService.process_and_save_visual_import(
-                        uploaded_file=uploaded_file,
+                    # 1. Convert Streamlit object to raw bytes/PIL Image HERE
+                    # This keeps the backend "Streamlit-free"
+                    from PIL import Image
+                    img = Image.open(uploaded_file)
+    
+                    # 2. Call the service. The service now returns a single status message.
+                    # We pass the agent so the service can update it internally.
+                    success_msg = CalendarService.process_visual_import_workflow(
+                        image=img,
                         user_id=st.session_state.user_id,
-                        categories=EVENT_CATEGORIES, # Ensure this is defined in your constants
-                        model_name=VISION_MODEL_NAME, # Ensure this is defined
-                        prompt_fn=get_vision_prompt,  # Your prompt function
+                        agent=st.session_state.agent,
                         hint=user_hint
                     )
                     
-                    if added_titles:
-                        st.success(f"✅ Imported {len(added_titles)} events.")
-                        
-                        # Keeping your cool Agent Sync logic
-                        sync_text = f"SYSTEM UPDATE: Visual Import used. Added: {', '.join(added_titles)}."
-                        try:
-                            st.session_state.agent.send_message(sync_text)
-                            st.session_state.messages.append({
-                                "role": "assistant", 
-                                "content": f"I've processed your image and added **{len(added_titles)}** events to your calendar."
-                            })
-                        except Exception:
-                            pass # Silent fail for sync is fine
-                            
-                        st.rerun()
-                    else:
-                        st.warning("No events found in the image.")
-                        
+                    # 3. Handle UI feedback
+                    st.success(success_msg)
+                    st.session_state.messages.append({"role": "assistant", "content": success_msg})
+                    st.rerun()
+                    
                 except Exception as e:
                     st.error(f"Vision Processing Error: {e}")
 
@@ -215,8 +203,7 @@ with st.sidebar:
     if st.button("Check for Conflicts"):
         with st.spinner("Analyzing schedule logic..."):
             try:
-                from tools.calendar_ops import get_conflicts_report
-                report = get_conflicts_report(st.session_state.user_id)  # ADD user_id
+                report = CalendarService.get_conflict_report(st.session_state.user_id)
                 
                 if "No conflicts" in report:
                     st.success(report)

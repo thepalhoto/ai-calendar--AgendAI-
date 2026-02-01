@@ -63,7 +63,7 @@ def _fetch_events_from_db(user_id: int) -> str:
                     # We only care about the date part for the shift
                     end_dt = parse_dt(end_str) 
                     # Add 1 day and set to midnight
-                    actual_end = (end_dt + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+                    actual_end = (end_dt + timedelta(days=1)).strftime("%Y-%m-%d")
                     end_str = actual_end
                 except Exception as e:
                     print(f"Error adjusting allDay end date: {e}")
@@ -309,16 +309,19 @@ def get_conflicts_report(user_id: int) -> str:
         horizon_end = max_rec_end if max_rec_end else (max_start + timedelta(days=30))
         horizon_end = max(horizon_end, max_start + timedelta(days=30))
 
+        now = datetime.now()
         # Build occurrences list
         occurrences = []
         for event in events:
             for occ_start, occ_end in iter_occurrences(event, horizon_end):
-                occurrences.append({
-                    "event_id": event["id"],
-                    "title": event["title"],
-                    "start": occ_start,
-                    "end": occ_end,
-                })
+                # --- 2. Only add occurrences that are happening now or in the future ---
+                if occ_end > now: 
+                    occurrences.append({
+                        "event_id": event["id"],
+                        "title": event["title"],
+                        "start": occ_start,
+                        "end": occ_end,
+                    })
 
         # Sweep line to detect overlaps efficiently
         occurrences.sort(key=lambda x: x["start"])
