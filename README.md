@@ -174,11 +174,16 @@ ai-calendar--AgendAI-/
 ├── data/
 │   └── scheduler.db       # SQLite database (Users & Events)
 ├── utils/                 # Utility scripts
-├── docs/                  # Documentation & assets
+│   ├── check_db.py        # Database inspection script
+│   ├── create_user.py     # Manual user creation script
+│   └── generate_requirements.py # Dependency management
+├── docs/                  # Documentation
+│   ├── ARCHITECTURE.md    # System design documentation
+│   └── TOOLS.md           # Tool definitions and usage
 └── requirements.txt       # Dependencies
+
 ```
 
-**Note:** Component-level READMEs (e.g., `services/README.md`, `tools/README.md`) are recommended if those components need detailed explanation.
 
 ## Technical Considerations
 
