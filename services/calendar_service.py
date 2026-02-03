@@ -67,6 +67,8 @@ class CalendarService:
                 end=event['end'], 
                 allDay=event.get('allDay', False),
                 user_id=user_id,
+                recurrence=event.get('recurrence'),
+                recurrence_end=event.get('recurrence_end'),
                 color=event.get('color', '#3788d8')
             )
             if "Success" in res:
