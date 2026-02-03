@@ -6,6 +6,7 @@ This design ensures that the user interface is decoupled from the complex AI log
 
 ## Architecture Diagram
 
+```mermaid
 graph TD
     %% Actors
     User([User])
