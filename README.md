@@ -88,19 +88,63 @@ streamlit run streamlit_app.py
 
 ## Usage
 
-Instructions and examples for using your application. Include:
-- How to navigate the interface
-- Key workflows
-- Screenshots or GIFs demonstrating functionality (recommended for visual clarity)
+AgendAI simplifies schedule management through an intuitive, AI-driven interface. Below is a guide on how to interact with the platform:
 
-**Example:**
+### 1. Secure Authentication
+AgendAI ensures data isolation. Each user maintains a private, secure database of their events.
+* **Sign Up:** Create a new account to get started.
+* **Log In:** Access your personalized calendar securely.
 
-1. Navigate to the main page
-2. Upload a document or enter your query
-3. Interact with the AI assistant through the chat interface
-4. View results and explore additional features
+**Sign Up:**
+<p align="center">
+  <img src="./assets/Streamlit-SignUp-ezgif.com-video-to-gif-converter.gif" width="800" alt="Sign Up Demo" />
+</p>
 
-*Add screenshots or GIFs here to visually demonstrate your application's key features*
+**Log In:**
+<p align="center">
+  <img src="./assets/Streamlit-LogIn-ezgif.com-video-to-gif-converter.gif" width="800" alt="Login Demo" />
+</p>
+
+---
+
+### 2. Natural Language Scheduling
+Talk to your calendar naturally. The assistant understands complex intent, relative dates (e.g., "next Friday"), and recurring events.
+* **Try saying:** *"Add a project meeting next Tuesday at 2 PM,"* or *"Move my 2 PM meeting to 4 PM."*
+
+<p align="center">
+  <img src="./assets/Streamlit-Addsingleevent-ezgif.com-video-to-gif-converter.gif" alt="Natural Language Chat Demo" width="800">
+</p>
+
+---
+
+### 3. Visual Schedule Import
+Upload images (PNG, JPG, WebP) of physical or digital schedules. The system uses **Gemini 2.0 Flash** to automatically extract events and populate your calendar.
+
+<p align="center">
+  <img src="./assets/Streamlit-VisualImport-ezgif.com-video-to-gif-converter.gif" alt="Visual Schedule Extraction Demo" width="800">
+</p>
+
+---
+
+### 4. Interactive Display, Audit & Logout
+Visualize your commitments, maintain a clash-free schedule, and manage your session securely.
+
+**Calendar Display:**
+<p align="center">
+  <img src="./assets/Streamlit-CalendarDisplay-ezgif.com-video-to-gif-converter.gif" width="800" alt="Calendar View Demo" />
+</p>
+
+**Conflict Audit:**
+<p align="center">
+  <img src="./assets/Streamlit-Audit-ezgif.com-video-to-gif-converter.gif" width="800" alt="Conflict Audit Demo" />
+</p>
+
+**Secure Logout:**
+<p align="center">
+  <img src="./assets/Streamlit-LogOut-ezgif.com-video-to-gif-converter.gif" width="800" alt="Logout Demo" />
+</p>
+
+---
 
 ## Deployment
 
@@ -136,18 +180,22 @@ ai-calendar--AgendAI-/
 
 **Note:** Component-level READMEs (e.g., `services/README.md`, `tools/README.md`) are recommended if those components need detailed explanation.
 
+## Technical Considerations
+
+* **Recurrence Handling:** Robustly supports standard daily, weekly, and monthly patterns; complex, non-standard intervals may require manual verification.
+* **Visual Extraction Limits:** High-resolution digital screenshots yield the best results. Low-quality photos or certain calendar layouts may lead to extraction errors, as they are unclear to the model.
+* **Read-Only Interface:** To ensure data consistency between the AI agent and the database, the calendar display operates on a read-only scheme; users cannot manually drag-and-drop slots.
+* **Global Timezone Baseline:** Currently operates on a standardized UTC/Server-side time baseline to maintain consistency across different user environments.
+
+## Future Work
+
+* **Voice Command Integration**: AgendAI could integrate Speech-to-Text (STT) to allow hands-free scheduling. By using Streamlit's audio recorder and Google Gemini's multimodal capabilities, the agent could ingest raw audio commands and execute them directly, removing the need for keyboard input.
+
+* **Google Calendar Sync:** Implementing 2-way synchronization with external calendar providers (Google, Outlook, Apple) to ensure mobile accessibility.
+
+
 ## Team
 
 - Carlota Fradinho e Silva - Frontend & UX Engineer
 - Gonçalo Palhoto - Backend & Tools Engineer 
 - Gonçalo Morais - AI & Logic Engineer
-
-## What Makes a Good README?
-
-Your README should answer:
-- **What** does this application do?
-- **Why** does it exist / what problem does it solve?
-- **How** do I run it locally?
-- **Who** built it?
-
-Keep it clear, organized, and professional. This is often the first thing evaluators and potential users will see.

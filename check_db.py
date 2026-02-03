@@ -17,6 +17,16 @@ try:
     for row in rows:
         # Now this will work because 'row' behaves like a dict
         print(dict(row))
+
+    print("\n")
+    
+    # 2. Check Users
+    cursor.execute("SELECT * FROM users")
+    users = cursor.fetchall()
+    print(f"--- Database Content ({len(users)} users) ---")
+    for user in users:
+        print(dict(user))
+
 except Exception as e:
     print(f"Error: {e}")
 
