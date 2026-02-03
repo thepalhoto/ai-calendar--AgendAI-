@@ -158,6 +158,16 @@ Instructions for deploying your own instance (if applicable).
 
 ```
 ai-calendar--AgendAI-/
+├── assets/                # Project assets (Demo GIFs & Test Calendars)
+│   ├── cal_mensais/       # Monthly calendar test images
+│   ├── cal_semanais/      # Weekly calendar test images
+│   ├── Streamlit-Addsingleevent....gif
+│   ├── Streamlit-Audit....gif
+│   ├── Streamlit-CalendarDisplay....gif
+│   ├── Streamlit-LogIn....gif
+│   ├── Streamlit-LogOut....gif
+│   ├── Streamlit-SignUp....gif
+│   └── Streamlit-VisualImport....gif
 ├── streamlit_app.py       # Main application entry point & UI
 ├── src/                   # Agent initialization and core logic
 │   └── agent.py           # AI Agent configuration
@@ -183,6 +193,8 @@ ai-calendar--AgendAI-/
 └── requirements.txt       # Dependencies
 
 ```
+
+> **Note:** The `assets/cal_mensais` and `assets/cal_semanais` folders contain example calendar images. These are provided for testing the **Visual Import** feature (e.g., for the professor's evaluation).
 
 
 ## Technical Considerations
