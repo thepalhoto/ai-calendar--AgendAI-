@@ -65,6 +65,7 @@ graph TD
     DocExt <-->|Vision Request| Gemini
     CalOps -->|Read/Write| LocalDB
     DBOps -->|Auth Check| LocalDB
+```
 
 ## Layers
 
